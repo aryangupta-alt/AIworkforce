@@ -42,6 +42,16 @@ def _clean_str(val):
 def _load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+    print("========== DEBUG ==========")
+    print("JSON FILE:", JSON_FILE)
+
+    print("PROJECT ALLOCATIONS:")
+    print(json.dumps(data.get("project_allocations", {}), indent=2))
+
+    print("ACTIVE PROJECTS TABLE:")
+    print(json.dumps(data.get("active_projects_table", []), indent=2))
+
+    print("===========================")
 
 
 def _map_project_types(active_projects_table):
@@ -163,14 +173,14 @@ def generate_report() -> None:
     for item in raw_unallocated:
 
      if isinstance(item, dict):
-        name = (
+            name = (
             item.get("name")
             or item.get("employee_name")
             or item.get("Employee Name")
             or item.get("Active Employee")
             or ""
         )
-    else:
+     else:
         name = str(item)
 
     info = emp_lookup.get(name, {})
