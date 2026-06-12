@@ -159,13 +159,27 @@ def generate_report() -> None:
     raw_unallocated = data.get("unallocated_employees", [])
 
     unallocated_employee_list = []
-    for name in raw_unallocated:
-        info = emp_lookup.get(name, {})
-        unallocated_employee_list.append({
-            "name": name,
-            "current_role": info.get("current_role", "—"),
-            "reporting_to": info.get("reporting_to", "—"),
-        })
+
+    for item in raw_unallocated:
+
+     if isinstance(item, dict):
+        name = (
+            item.get("name")
+            or item.get("employee_name")
+            or item.get("Employee Name")
+            or item.get("Active Employee")
+            or ""
+        )
+    else:
+        name = str(item)
+
+    info = emp_lookup.get(name, {})
+
+    unallocated_employee_list.append({
+        "name": name,
+        "current_role": info.get("current_role", "—"),
+        "reporting_to": info.get("reporting_to", "—"),
+    })
 
     generated_date = datetime.now().strftime("%d %B %Y")
 

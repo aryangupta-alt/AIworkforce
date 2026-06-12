@@ -1,48 +1,80 @@
 # Wohlig Report Pipeline Dashboard
 
-Full-stack automation dashboard for generating workforce intelligence reports from Google Drive → LLM Analysis → HTML/PDF → Email.
+Full-stack automation dashboard for generating workforce intelligence reports from Google Drive → LLM Analysis → HTML/PDF → Email with automated scheduling.
 
-## Architecture
+## 🏗️ Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Next.js App   │────▶│   FastAPI API   │────▶│ Python Pipeline │
-│   Port 3000     │     │   Port 8000     │     │  (app.py)       │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                                               │
-        │            ┌──────────────┐                  │
-        └───────────▶│  APScheduler │◀─────────────────┘
-                     │  (cron-like) │
-                     └──────────────┘
+┌──────────────────┐        ┌──────────────────┐        ┌─────────────────┐
+│   Next.js 14     │───────▶│   FastAPI 0.111  │───────▶│ Python Pipeline │
+│   React 18       │        │   Port 8000      │        │  (Ollama)       │
+│   Port 3000      │        │                  │        │                 │
+└──────────────────┘        └──────────────────┘        └─────────────────┘
+                                     │                          │
+                            ┌────────┴──────────┐                │
+                            │                   ▼                │
+                       ┌─────────────────────────────┐           │
+                       │  Background Scheduler       │◀──────────┘
+                       │  (Local: every 60s)         │
+                       │  (Vercel: Cron Jobs)        │
+                       └─────────────────────────────┘
 ```
 
-## Setup
+## 🛠️ Tech Stack
 
-### 1. Install Python Dependencies
+| Component | Technology | Version |
+|-----------|-----------|---------|
+| **Frontend** | Next.js + React | 14.2.5 / 18.3.1 |
+| **Styling** | Tailwind CSS + PostCSS | 3.4.7 |
+| **Backend API** | FastAPI + Uvicorn | 0.111.0 |
+| **LLM** | Ollama (local or cloud) | Any model |
+| **Data Source** | Google Drive API | v3 |
+| **Email** | SMTP (Gmail) | TLS 1.2 |
+| **Scheduling** | Background Thread + Vercel Cron | Local + Cloud |
+| **Database** | JSON Files (local) / Vercel KV (cloud) | - |
+
+## 🚀 Quick Start
+
+## 🚀 Quick Start
+
+### Local Development (5 minutes)
+
+**Prerequisites:**
+- Python 3.9+
+- Node.js 18+
+- Google Service Account JSON (for Drive access)
+- Gmail App Password (for email)
+- Ollama running locally (or cloud API key)
+
+**1. Install Dependencies**
 
 ```bash
-cd /path/to/pipeline
+# Python backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r api/requirements.txt
-pip install python-dotenv pandas openpyxl google-api-python-client ollama jinja2
+
+# Node frontend
+cd dashboard
+npm install
+cd ..
 ```
 
-### 2. Configure Environment
+**2. Configure Environment**
 
-Edit `.env` in the project root:
+Create `.env` in project root:
 
 ```env
-# ── Ollama ───────────────────────────────────────
-OLLAMA_API_KEY=your-key
+# ── Google Drive ──────────────────────────
+GOOGLE_SERVICE_ACCOUNT_FILE=my-service-account.json
+DRIVE_FILE_ID=1EAGD1LreF9KF3kSyqsOTSinmo9iSEDWn
+DRIVE_FILE_NAME=Wohlig Active Employee Data.xlsx
+
+# ── Ollama LLM ────────────────────────────
+OLLAMA_API_KEY=your-api-key
 OLLAMA_MODEL=gemma4:31b-cloud
 
-# ── Google Drive ──────────────────────────────────
-GOOGLE_SERVICE_ACCOUNT_FILE=my-service-account.json
-DRIVE_FILE_NAME=Wohlig Active Employee Data.xlsx
-DRIVE_FILE_ID=1EAGD1LreF9KF3kSyqsOTSinmo9iSEDWn
-
-# ── SMTP / Email ─────────────────────────────────
+# ── Gmail SMTP ────────────────────────────
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
@@ -50,53 +82,299 @@ SMTP_PASSWORD=your-app-password
 SMTP_FROM=your-email@gmail.com
 ```
 
-For Gmail, generate an **App Password** at https://myaccount.google.com/apppasswords
+> 💡 **Gmail Setup:** Generate App Password at https://myaccount.google.com/apppasswords (enable 2FA first)
 
-### 3. Install Node.js & Frontend Dependencies
-
-Requires **Node.js 18+**.
+**3. Start Development Servers**
 
 ```bash
-cd dashboard
-npm install
-```
-
-## Running the Application
-
-### Option A: One-Command Start (Terminal 1)
-
-```bash
-chmod +x start.sh
-./start.sh
-```
-
-Then open: http://localhost:3000
-
-### Option B: Separate Terminals
-
-**Terminal 1 — Backend:**
-```bash
-cd /path/to/pipeline
+# Terminal 1: Backend (auto-starts scheduler)
 source .venv/bin/activate
-python3 -c "import sys; sys.path.insert(0,'.'); from api.main import app; import uvicorn; uvicorn.run(app, host='127.0.0.1', port=8000)"
+uvicorn api.main:app --reload
+
+# Terminal 2: Frontend
+cd dashboard && npm run dev
 ```
 
-**Terminal 2 — Frontend:**
+Open http://localhost:3000
+
+---
+
+## ⏰ Scheduler Configuration
+
+### Local Development
+
+The **background scheduler** runs automatically:
+- ✅ Starts with backend
+- ✅ Checks every 60 seconds
+- ✅ Executes `/api/cron` endpoint
+- ✅ Sends emails on schedule
+
+**Logs you'll see:**
+```
+[BACKGROUND_SCHEDULER] Starting background scheduler...
+[SCHEDULER] ✓ Email sent successfully
+[SCHEDULER] Next run calculated: 2026-06-13T15:30:00
+```
+
+### Using Frontend Settings
+
+1. Open http://localhost:3000 → **Settings** tab
+2. Configure:
+   - **Recipients:** Select email addresses
+   - **Next Run:** Set execution time
+   - **Cron Expression:** `*/2 * * * *` (every 2 min) or leave empty
+   - **Interval (hours):** `24` (used if no cron)
+   - **Continuous:** ✓ Check for recurring runs
+   - **Active:** ✓ Check to enable
+
+3. Click **Save Settings** → Scheduler triggers immediately
+
+**Example Cron Expressions:**
+```
+*/2 * * * *     → Every 2 minutes
+0 9 * * *       → Daily at 9 AM
+0 */6 * * *     → Every 6 hours
+0 0 * * 1       → Weekly on Monday
+```
+
+### Manual Testing
+
 ```bash
-cd /path/to/pipeline/dashboard
-npm run dev
+# Trigger scheduler manually
+curl http://127.0.0.1:8000/api/cron
+
+# View current settings
+curl http://127.0.0.1:8000/api/settings
+
+# View generated report
+curl http://127.0.0.1:8000/api/report
 ```
 
-Then open: http://localhost:3000
+---
 
-## Usage
+## 🌐 Vercel Deployment
 
-### 1. Run Pipeline Manually
-- Click **Go** button to execute the full pipeline:
-  - Fetch Excel from Google Drive
-  - LLM Analysis via Ollama
-  - Generate HTML Report
-- The report appears in the Preview tab instantly.
+### Prerequisites
+
+- GitHub repository with code pushed
+- Vercel account (free)
+- Environment variables ready
+
+### Step-by-Step Deployment
+
+**1. Push Code to GitHub**
+
+```bash
+git add .
+git commit -m "Ready for Vercel deployment"
+git push origin main
+```
+
+**2. Create Vercel Project**
+
+- Go to https://vercel.com/dashboard
+- Click **"Add New..."** → **"Project"**
+- Select your GitHub `pipeline` repo
+- Click **"Import"**
+
+Vercel auto-detects:
+- ✅ Next.js frontend
+- ✅ Python backend
+- ✅ vercel.json config
+
+**3. Add Environment Variables**
+
+In Vercel dashboard → **Settings** → **Environment Variables**, add:
+
+```
+SMTP_HOST                     smtp.gmail.com
+SMTP_PORT                     587
+SMTP_USER                     your-email@gmail.com
+SMTP_PASSWORD                 your-app-password
+SMTP_FROM                     your-email@gmail.com
+GOOGLE_SERVICE_ACCOUNT_JSON   {"type":"service_account","project_id":"..."}
+DRIVE_FILE_ID                 1EAGD1LreF9KF3kSyqsOTSinmo9iSEDWn
+DRIVE_FILE_NAME               Wohlig Active Employee Data.xlsx
+OLLAMA_API_KEY                your-api-key
+OLLAMA_MODEL                  gemma4:31b-cloud
+```
+
+**4. Redeploy**
+
+- Go to **Deployments**
+- Click **"Redeploy"** on latest deployment
+
+Wait 3-5 minutes for deployment...
+
+**5. Verify Deployment**
+
+```bash
+# Check health
+curl https://your-app.vercel.app/health
+
+# Trigger scheduler manually
+curl https://your-app.vercel.app/api/cron
+```
+
+**6. Test Scheduler (Optional)**
+
+Update [vercel.json](vercel.json) to test every 2 minutes:
+
+```json
+{
+  "crons": [{
+    "path": "/api/cron",
+    "schedule": "*/2 * * * *"
+  }]
+}
+```
+
+Push the change → Vercel redeploys automatically
+
+---
+
+## � Project Structure
+
+```
+pipeline/
+├── api/
+│   ├── main.py                 # FastAPI app + scheduler
+│   ├── email_sender.py         # SMTP email + PDF generation
+│   ├── settings_manager.py     # Schedule settings persistence
+│   ├── requirements.txt        # Python dependencies
+│   └── schedule_settings.json  # Current schedule config (gitignored)
+│
+├── dashboard/
+│   ├── app/
+│   │   ├── page.tsx           # Main UI + Settings form
+│   │   ├── layout.tsx         # Root layout
+│   │   └── globals.css        # Global styles
+│   ├── public/                # Static assets
+│   ├── package.json           # Node dependencies
+│   └── tailwind.config.ts     # Tailwind config
+│
+├── app.py                      # Python pipeline orchestrator
+├── drive_extract.py            # Google Drive → Excel extraction
+├── llm_analysis.py             # Ollama LLM analysis
+├── report_service.py           # HTML report generation
+├── start.sh                    # One-command local start
+├── vercel.json                 # Vercel + Cron config
+├── README.md                   # This file
+└── .env                        # Secrets (gitignored)
+```
+
+---
+
+## 🔄 Pipeline Flow
+
+### Manual Execution (Button Click)
+
+1. **Frontend:** Click "Go" button
+2. **Backend:** Runs pipeline via `/api/run-pipeline` (SSE streaming)
+3. **Drive Extract:** Fetches Excel from Google Drive
+4. **LLM Analysis:** Ollama processes workforce data
+5. **Report Generation:** Jinja2 creates HTML
+6. **PDF Conversion:** Chrome/Chromium headless converts to PDF
+7. **Display:** Report shows in Preview tab instantly
+
+### Automated Execution (Scheduler)
+
+1. **Settings Saved:** User configures recipients + schedule
+2. **Background Scheduler:** Checks every 60 seconds (local) or cron job (Vercel)
+3. **Condition Met:** If time reached, triggers `_scheduled_job()`
+4. **Pipeline Runs:** Full flow (extract → analyze → report → PDF)
+5. **Email Sent:** PDF attachment to all recipients
+6. **Next Run:** Calculated and saved to schedule_settings.json
+
+---
+
+## 🐛 Debugging
+
+### View Scheduler Logs
+
+**Local:**
+```bash
+# Terminal running uvicorn
+[SCHEDULER] Starting scheduled job
+[SCHEDULER] ✓ PDF generated
+[SCHEDULER] Sending to: ['email@example.com']
+[SCHEDULER] ✓ Email sent successfully
+```
+
+**Vercel:**
+- Go to https://vercel.com/dashboard → Deployments → Logs
+- Scroll to find `[SCHEDULER]` output
+
+### Test Endpoints
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Trigger scheduler
+curl http://localhost:8000/api/cron
+
+# Get settings
+curl http://localhost:8000/api/settings | jq
+
+# Run pipeline
+curl -X POST http://localhost:8000/api/run-pipeline \
+  -H "Content-Type: application/json" \
+  -d '{"test": true}'
+```
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| Email not sent | Check SMTP credentials in `.env` / Vercel env vars |
+| Report not generated | Verify Google Drive file ID + service account permissions |
+| Scheduler not running | Check `[BACKGROUND_SCHEDULER]` logs, ensure `VERCEL` env not set |
+| PDF generation failed | Chrome/Chromium not installed on Vercel (normal, HTML attachment used) |
+| Double emails | Fixed with debounce flag in frontend |
+
+---
+
+## 📊 Features
+
+- ✅ **Full Automation:** Extract → Analyze → Report → Email
+- ✅ **Cron Scheduling:** Flexible cron expressions + simple intervals
+- ✅ **Smart Scheduling:** Different behavior for local vs cloud
+- ✅ **Background Processing:** Non-blocking pipeline execution
+- ✅ **Email Attachments:** PDF or HTML fallback
+- ✅ **Responsive UI:** Tailwind CSS responsive design
+- ✅ **Real-time Preview:** HTML report preview in dashboard
+- ✅ **Cloud Ready:** Vercel deployment with cron jobs
+- ✅ **Debugging:** Comprehensive logging + terminal output
+
+---
+
+## 🔐 Security Considerations
+
+1. **Never commit `.env`** — gitignore is set up
+2. **Use App Passwords** — Gmail specific passwords, not main password
+3. **Vercel Env Vars** — Always use Vercel dashboard, never commit secrets
+4. **Google Service Account** — Share only with necessary Drive access
+5. **CRON_SECRET** — Optional: add token to Vercel cron calls for verification
+
+---
+
+## 📝 License
+
+Private project - Wohlig Technologies
+
+---
+
+## 🤝 Support
+
+For issues or questions:
+1. Check logs in backend terminal or Vercel dashboard
+2. Verify `.env` variables are set correctly
+3. Test `/api/cron` endpoint manually
+4. Check Google Drive permissions
+5. Verify Ollama API access
+
+
 
 ### 2. Send Email
 - Open **Settings** (⚙️)
