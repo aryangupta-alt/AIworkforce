@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Workforce Intelligence Report — Wohlig Transformations</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:    #0A1628;
+      --blue:    #1E3A5F;
+      --accent:  #2563EB;
+      --sky:     #DBEAFE;
+      --slate:   #64748B;
+      --gold:    #F59E0B;
+      --red:     #DC2626;
+      --green:   #16A34A;
+      --light:   #F8FAFC;
+      --border:  #E2E8F0;
+      --indigo:  #4354D4;
+      --purple:  #8F35F5;
+      --mist:    #EEF0FF;
+      --orchid:  #F0EDFF;
+      --hairline:#E6E8F2;
+      --grad:    linear-gradient(135deg, #4354D4 0%, #8F35F5 100%);
+    }
+
+    * { box-sizing: border-box; }
+
+    /* ── PRESENTATION / SCREEN LOOK (Balanced, not over-stretched) ── */
+    body {
+      font-family: 'Inter', sans-serif;
+      background:
+        radial-gradient(ellipse 80% 60% at 92% 5%,  rgba(143,53,245,0.11), transparent 55%),
+        radial-gradient(ellipse 70% 55% at 4%  96%, rgba(67,84,212,0.10),  transparent 52%),
+        linear-gradient(160deg, #F6F7FF 0%, #EEF0FF 55%, #F0EDFF 100%);
+      color: #1E293B;
+      margin: 0; padding: 40px 20px;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+
+    .page-wrapper {
+      max-width: 960px; /* Brought down from 1200px to stop excessive spreading */
+      margin: 0 auto;
+    }
+
+    .report-section {
+      width: 100%;
+      margin-bottom: 40px;
+      display: flex;
+      flex-direction: column;
+      background: rgba(255, 255, 255, 0.85);
+      padding: 32px;
+      border-radius: 16px;
+      border: 1px solid rgba(230, 232, 242, 0.9);
+      box-shadow: 0 12px 40px -12px rgba(67,84,212,0.09);
+      backdrop-filter: blur(16px);
+    }
+
+    .report-header {
+      border-bottom: 1.5px solid var(--hairline);
+      padding-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .wohlig-logo img {
+      height: 32px;
+      width: auto;
+      display: block;
+    }
+
+    .report-header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 3px;
+    }
+    .report-header-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy);
+      letter-spacing: 0.02em;
+    }
+    .report-header-meta {
+      font-size: 10.5px;
+      color: var(--slate);
+    }
+    .confidential-tag {
+      display: inline-block;
+      margin-top: 2px;
+      background: var(--mist);
+      border: 1px solid var(--hairline);
+      color: var(--indigo);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .section-body { flex: 1; display: flex; flex-direction: column; }
+
+    .section-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--indigo);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .section-eyebrow::before {
+      content: '';
+      width: 20px; height: 2px;
+      border-radius: 2px;
+      background: var(--grad);
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+
+    .section-desc {
+      font-size: 12px;
+      color: var(--slate);
+      margin-bottom: 24px;
+      max-width: 720px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background: #fff;
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      padding: 14px 18px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      box-shadow: 0 4px 14px -4px rgba(67,84,212,0.06);
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3.5px;
+      background: var(--grad);
+    }
+    .kpi-card.kpi-primary {
+      background: var(--grad);
+      border-color: transparent;
+      box-shadow: 0 6px 20px -6px rgba(143,53,245,0.25);
+    }
+    .kpi-card.kpi-primary::before { background: rgba(255,255,255,0.25); height: 2px; }
+    .kpi-card.kpi-warn::before    { background: linear-gradient(90deg, #F59E0B, #FCD34D); }
+
+    .kpi-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--slate);
+    }
+    .kpi-card.kpi-primary .kpi-label { color: rgba(255,255,255,0.75); }
+
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--navy);
+    }
+    .kpi-card.kpi-primary .kpi-value { color: #fff; }
+    .kpi-card.kpi-warn    .kpi-value { color: #92400E; }
+
+    .kpi-sub {
+      font-size: 11px;
+      color: var(--slate);
+    }
+    .kpi-card.kpi-primary .kpi-sub { color: rgba(255,255,255,0.7); }
+
+    .alloc-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .alloc-card {
+      background: #fff;
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px -4px rgba(67,84,212,0.05);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .alloc-card-header {
+      background: linear-gradient(155deg, var(--mist), var(--orchid));
+      border-bottom: 1px solid var(--hairline);
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .alloc-project-name {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .alloc-badge {
+      background: white;
+      border: 1px solid var(--hairline);
+      color: var(--indigo);
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .alloc-employees,
+    .project-list {
+      padding: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .project-list { flex-direction: column; gap: 0; padding: 8px 14px; }
+
+    .project-item {
+      font-size: 11px;
+      font-weight: 600;
+      color: #475569;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--hairline);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .project-item::before {
+      content: '';
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: var(--indigo);
+    }
+    .project-item:last-child { border-bottom: none; }
+
+    .emp-chip {
+      background: var(--mist);
+      border: 1px solid var(--hairline);
+      border-radius: 99px;
+      padding: 3px 9px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--indigo);
+    }
+
+    .bench-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, #FFFBEB, #FEF3C7);
+      border: 1px solid #FCD34D;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+    }
+    .bench-icon { font-size: 16px; }
+    .bench-text { font-size: 12px; font-weight: 700; color: #92400E; }
+    .bench-sub  { font-size: 11px; color: #B45309; margin-left: 6px; display: inline-block; }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .data-table thead tr { background: var(--grad); }
+    .data-table thead th {
+      color: rgba(255,255,255,0.9);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: left;
+    }
+    .data-table tbody tr:nth-child(even) { background: var(--mist); }
+    .data-table tbody td {
+      padding: 10px 14px;
+      font-size: 11.5px;
+      color: #334155;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .td-num  { color: var(--slate) !important; font-weight: 600; }
+    .td-name { font-weight: 700; color: var(--navy) !important; }
+
+    .report-footer {
+      padding-top: 10px;
+      border-top: 1px solid var(--hairline);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 24px;
+    }
+    .footer-left, .footer-right { font-size: 9.5px; color: var(--slate); }
+
+
+    /* ── AUTOMATIC COMPACT PRINT/PDF VIEW OVERRIDE ── */
+    @media print {
+      @page {
+        size: A4;
+        margin: 10mm 12mm;
+      }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { background: #fff; padding: 0; font-size: 11px; line-height: 1.4; }
+      .page-wrapper { width: 100%; max-width: 100%; padding: 0; margin: 0; }
+      
+      .report-section { 
+        display: block;
+        background: #fff; 
+        border: 1px solid var(--hairline); 
+        box-shadow: none;
+        backdrop-filter: none;
+        margin-bottom: 15px;
+        padding: 12px;
+        border-radius: 12px;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .section-body { display: block; }
+
+      .report-header { padding-bottom: 6px; margin-bottom: 10px; }
+      .wohlig-logo img { height: 26px; }
+      .section-title { font-size: 18px; margin-bottom: 2px; }
+      .section-desc { font-size: 10.5px; margin-bottom: 10px; }
+      
+      .kpi-grid { gap: 8px; margin-bottom: 10px; }
+      .kpi-card { padding: 8px 12px; gap: 2px; border-radius: 8px; }
+      .kpi-value { font-size: 22px; }
+      
+      .alloc-grid { gap: 8px; }
+      .alloc-card { border-radius: 8px; }
+      .alloc-card-header { padding: 6px 10px; }
+      .alloc-employees, .project-list { padding: 6px 10px; gap: 4px; }
+      .project-item { font-size: 10px; padding: 4px 0; }
+      .emp-chip { padding: 2px 6px; font-size: 9.5px; }
+      
+      .bench-banner { padding: 6px 10px; margin-bottom: 8px; border-radius: 6px; }
+      .bench-text { font-size: 11px; }
+      .bench-sub { font-size: 10px; }
+      
+      .data-table th, .data-table td { padding: 6px 10px; font-size: 10px; }
+      .report-footer { margin-top: 12px; padding-top: 6px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+  <!-- SECTION 01 -->
+  <div class="report-section">
+    <div class="report-header">
+      <div class="wohlig-logo">
+        <img src="{{ logo_data_uri }}" alt="Wohlig Logo">
+      </div>
+      <div class="report-header-right">
+        <div class="report-header-title">Workforce Intelligence Report</div>
+        <div class="report-header-meta">Wohlig Transformations Pvt. Ltd. &nbsp;·&nbsp; {{ generated_date }}</div>
+        <span class="confidential-tag">Confidential + Proprietary</span>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="section-eyebrow">Section 01</div>
+      <div class="section-title">Workforce Overview</div>
+      <div class="section-desc">Key performance indicators reflecting current headcount, allocation footprint, and capacity health of the organisation.</div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card kpi-primary">
+          <div class="kpi-label">Active Employees</div>
+          <div class="kpi-value">{{ workforce.active_employees }}</div>
+          <div class="kpi-sub">Total active workforce</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Current Projects</div>
+          <div class="kpi-value">{{ workforce.current_projects }}</div>
+          <div class="kpi-sub">Active client, retainer &amp; internal initiatives</div>
+        </div>
+        <div class="kpi-card kpi-warn">
+          <div class="kpi-label">Unallocated Employees</div>
+          <div class="kpi-value">{{ workforce.unallocated_employees }}</div>
+          <div class="kpi-sub">Available for deployment</div>
+        </div>
+      </div>
+
+      <div class="alloc-grid">
+        <div class="alloc-card">
+          <div class="alloc-card-header">
+            <span class="alloc-project-name">Client Projects</span>
+            <span class="alloc-badge">{{ workforce.project_distribution.client_projects.count }}</span>
+          </div>
+          <div class="project-list">
+            {% for project in workforce.project_distribution.client_projects.projects %}
+            <div class="project-item">{{ project }}</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="alloc-card">
+          <div class="alloc-card-header">
+            <span class="alloc-project-name">Retainer Projects</span>
+            <span class="alloc-badge">{{ workforce.project_distribution.retainer_projects.count }}</span>
+          </div>
+          <div class="project-list">
+            {% for project in workforce.project_distribution.retainer_projects.projects %}
+            <div class="project-item">{{ project }}</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="alloc-card">
+          <div class="alloc-card-header">
+            <span class="alloc-project-name">Internal Projects</span>
+            <span class="alloc-badge">{{ workforce.project_distribution.internal_projects.count }}</span>
+          </div>
+          <div class="project-list">
+            {% for project in workforce.project_distribution.internal_projects.projects %}
+            <div class="project-item">{{ project }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-footer">
+      <div class="footer-left"><strong>Wohlig Transformations</strong> · Workforce Overview</div>
+      <div class="footer-right">Generated on {{ generated_date }}</div>
+    </div>
+  </div>
+
+  <!-- SECTION 02 -->
+  <div class="report-section">
+    <div class="report-header">
+      <div class="wohlig-logo">
+        <img src="{{ logo_data_uri }}" alt="Wohlig Logo">
+      </div>
+      <div class="report-header-right">
+        <div class="report-header-title">Workforce Intelligence Report</div>
+        <div class="report-header-meta">Wohlig Transformations Pvt. Ltd. &nbsp;·&nbsp; {{ generated_date }}</div>
+        <span class="confidential-tag">Confidential + Proprietary</span>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="section-eyebrow">Section 02</div>
+      <div class="section-title">Project Allocation Summary</div>
+      <div class="section-desc">Complete deployment details across all active engagements. All employee names are listed in full without truncation.</div>
+
+      <div class="alloc-grid">
+        {% for project in project_allocation_summary %}
+        <div class="alloc-card">
+          <div class="alloc-card-header">
+            <span class="alloc-project-name">{{ project.project_name }}</span>
+            <span class="alloc-badge">{{ project.employee_count }} Employees</span>
+          </div>
+          <div class="alloc-employees">
+            {% for employee in project.employees %}
+            <span class="emp-chip">{{ employee }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="report-footer">
+      <div class="footer-left"><strong>Wohlig Transformations</strong> · Allocation Summary</div>
+      <div class="footer-right">Generated on {{ generated_date }}</div>
+    </div>
+  </div>
+
+  <!-- SECTION 03 -->
+  <div class="report-section">
+    <div class="report-header">
+      <div class="wohlig-logo">
+        <img src="{{ logo_data_uri }}" alt="Wohlig Logo">
+      </div>
+      <div class="report-header-right">
+        <div class="report-header-title">Workforce Intelligence Report</div>
+        <div class="report-header-meta">Wohlig Transformations Pvt. Ltd. &nbsp;·&nbsp; {{ generated_date }}</div>
+        <span class="confidential-tag">Confidential + Proprietary</span>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="section-eyebrow">Section 03</div>
+      <div class="section-title">Unallocated Employees — Bench Capacity</div>
+      <div class="section-desc">Employees currently without active client or project assignments, representing both an immediate deployment opportunity and a retention consideration.</div>
+
+      <div class="bench-banner">
+        <div class="bench-icon">⚠️</div>
+        <div>
+          <span class="bench-text">{{ workforce.unallocated_employees }} Employees Currently on Bench</span>
+          <span class="bench-sub">| Unallocated capacity requires prompt redeployment planning.</span>
+        </div>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th>Employee Name</th>
+            <th>Current Role</th>
+            <th>Reporting Manager</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for employee in unallocated_employee_list %}
+          <tr>
+            <td class="td-num">{{ "%02d"|format(loop.index) }}</td>
+            <td class="td-name">{{ employee.name }}</td>
+            <td>{{ employee.current_role }}</td>
+            <td>{{ employee.reporting_to }}</td>
+            <td><span style="color:#B45309; font-weight:600;">● Unallocated</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="report-footer">
+      <div class="footer-left"><strong>Wohlig Transformations</strong> · Bench Capacity</div>
+      <div class="footer-right">Generated on {{ generated_date }} · For Internal Use Only</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

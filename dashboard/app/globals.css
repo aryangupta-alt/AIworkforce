@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --indigo: #4354D4;
+  --purple: #8F35F5;
+  --navy: #0A1628;
+  --slate: #64748B;
+  --mist: #EEF0FF;
+  --orchid: #F0EDFF;
+  --hairline: #E6E8F2;
+  --success: #16A34A;
+  --danger: #DC2626;
+  --radius: 12px;
+}
+
+body {
+  background: var(--mist);
+  color: var(--navy);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Ubuntu, Cantarell, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  margin: 0;
+  min-height: 100vh;
+}

@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wohlig Report Viewer</title>
+  <style>
+    :root {
+      --indigo: #4354D4;
+      --purple: #8F35F5;
+      --navy: #0A1628;
+      --blue-dark: #1E3A5F;
+      --accent-blue: #2563EB;
+      --mist: #EEF0FF;
+      --orchid: #F0EDFF;
+      --sky: #DBEAFE;
+      --light: #F8FAFC;
+      --hairline: #E6E8F2;
+      --border-light: #E2E8F0;
+      --slate: #64748B;
+      --dark-slate: #475569;
+      --body-text: #1E293B;
+      --table-text: #334155;
+      --success: #16A34A;
+      --success-light: #4ADE80;
+      --danger: #DC2626;
+      --danger-light: #F87171;
+      --white: #FFFFFF;
+      --radius: 12px;
+      --shadow: 0 4px 20px rgba(10,22,40,0.08);
+      --shadow-lg: 0 10px 40px rgba(10,22,40,0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Ubuntu, Cantarell, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--light);
+      color: var(--body-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 12px 24px;
+      background: var(--navy);
+      border-bottom: 1px solid var(--hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .logo-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, var(--mist) 0%, var(--orchid) 100%);
+      border-radius: 10px;
+      padding: 6px 12px;
+      border: 1px solid var(--hairline);
+      box-shadow: 0 2px 8px rgba(67,84,212,0.1);
+    }
+
+    .logo {
+      height: 32px;
+      width: auto;
+      object-fit: contain;
+      display: block;
+    }
+
+    .url-input {
+      flex: 1;
+      max-width: 680px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .url-input input {
+      flex: 1;
+      background: var(--white);
+      border: 1px solid var(--hairline);
+      color: var(--body-text);
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      outline: none;
+      font-size: 14px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .url-input input::placeholder { color: var(--slate); }
+    .url-input input:focus {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px rgba(67,84,212,0.12);
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--hairline);
+      background: var(--white);
+      color: var(--table-text);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: 0 1px 2px rgba(10,22,40,0.04);
+    }
+
+    .btn:hover {
+      background: var(--mist);
+      border-color: var(--indigo);
+      color: var(--indigo);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(67,84,212,0.15);
+    }
+    .btn:active { transform: translateY(0); }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--indigo) 0%, var(--purple) 100%);
+      border-color: transparent;
+      color: var(--white);
+    }
+    .btn.primary:hover {
+      background: linear-gradient(135deg, #3a49c0 0%, #7e2edc 100%);
+      color: var(--white);
+      box-shadow: 0 6px 20px rgba(67,84,212,0.3);
+    }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .btn.success {
+      background: var(--success);
+      border-color: var(--success);
+      color: var(--white);
+    }
+    .btn.success:hover {
+      background: var(--success);
+      filter: brightness(1.1);
+      color: var(--white);
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 24px;
+      gap: 16px;
+      position: relative;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .viewer {
+      flex: 1;
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+      background: var(--white);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--mist);
+    }
+
+    .tab {
+      appearance: none;
+      background: transparent;
+      border: none;
+      color: var(--slate);
+      padding: 12px 18px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .tab:hover { color: var(--indigo); background: rgba(67,84,212,0.04); }
+    .tab.active {
+      color: var(--indigo);
+      border-bottom-color: var(--indigo);
+      background: rgba(67,84,212,0.06);
+    }
+
+    .pane { display: none; height: 100%; overflow: auto; }
+    .pane.active { display: block; }
+
+    iframe.preview {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+      background: var(--white);
+    }
+
+    pre.code {
+      margin: 0;
+      padding: 20px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--table-text);
+      background: var(--white);
+    }
+
+    /* Pipeline Progress Overlay */
+    .pipeline-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(248,250,252,0.97);
+      z-index: 20;
+      display: none;
+      flex-direction: column;
+      padding: 40px 48px;
+      gap: 24px;
+      overflow-y: auto;
+    }
+    .pipeline-overlay.active { display: flex; }
+
+    .pipeline-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .pipeline-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--navy);
+    }
+    .pipeline-close {
+      font-size: 13px;
+      color: var(--slate);
+      cursor: pointer;
+      padding: 6px 12px;
+      border-radius: 8px;
+      transition: background 0.2s;
+    }
+    .pipeline-close:hover { background: var(--mist); color: var(--indigo); }
+
+    .pipeline-stages {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .stage-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 20px;
+      background: var(--white);
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      transition: all 0.3s ease;
+    }
+    .stage-item.running {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px rgba(67,84,212,0.08);
+    }
+    .stage-item.completed {
+      border-color: var(--success);
+      background: rgba(22,163,74,0.03);
+    }
+    .stage-item.error {
+      border-color: var(--danger);
+      background: rgba(220,38,38,0.03);
+    }
+    .stage-item.pending { opacity: 0.6; }
+
+    .stage-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+      font-weight: 700;
+      background: var(--light);
+      color: var(--slate);
+      border: 1px solid var(--hairline);
+    }
+    .stage-item.running .stage-icon {
+      background: linear-gradient(135deg, var(--indigo), var(--purple));
+      color: var(--white);
+      border-color: transparent;
+      animation: pulse 1.5s infinite;
+    }
+    .stage-item.completed .stage-icon {
+      background: var(--success);
+      color: var(--white);
+      border-color: transparent;
+    }
+    .stage-item.error .stage-icon {
+      background: var(--danger);
+      color: var(--white);
+      border-color: transparent;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .stage-content { flex: 1; }
+    .stage-name {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--navy);
+      margin-bottom: 4px;
+    }
+    .stage-desc {
+      font-size: 12px;
+      color: var(--slate);
+    }
+    .stage-log {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: var(--light);
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: var(--dark-slate);
+      max-height: 120px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+    .stage-log::-webkit-scrollbar { width: 4px; }
+    .stage-log::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 2px; }
+
+    .pipeline-footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--hairline);
+    }
+    .pipeline-status {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--indigo);
+    }
+    .pipeline-status.error { color: var(--danger); }
+    .pipeline-status.success { color: var(--success); }
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--hairline);
+      border-top-color: var(--indigo);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--white);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--slate);
+      box-shadow: var(--shadow);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--slate);
+    }
+    .dot.ok { background: var(--success); }
+    .dot.err { background: var(--danger); }
+
+    /* Settings panel */
+    .settings-panel {
+      position: absolute;
+      top: 16px;
+      right: 24px;
+      width: min(400px, 92vw);
+      background: var(--white);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      z-index: 100;
+      display: none;
+      overflow: hidden;
+    }
+    .settings-panel.open { display: block; }
+
+    .panel-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+      color: var(--navy);
+      background: var(--mist);
+    }
+    .panel-body { padding: 16px 20px; }
+    .panel-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--hairline);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: var(--light);
+    }
+
+    .email-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .email-btn { justify-content: center; }
+    .email-btn.active {
+      background: linear-gradient(135deg, var(--indigo) 0%, var(--purple) 100%);
+      border-color: transparent;
+      color: var(--white);
+      box-shadow: 0 4px 12px rgba(67,84,212,0.25);
+    }
+    .email-btn.active:hover {
+      color: var(--white);
+      filter: brightness(1.05);
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--indigo);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding: 4px 0;
+    }
+    .toggle-label { font-weight: 700; font-size: 15px; color: var(--navy); }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 52px;
+      height: 28px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--border-light);
+      border-radius: 30px;
+      transition: 0.3s;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 4px;
+      bottom: 4px;
+      background: var(--white);
+      border-radius: 50%;
+      transition: 0.3s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .switch input:checked + .slider { background: linear-gradient(135deg, var(--indigo) 0%, var(--purple) 100%); }
+    .switch input:checked + .slider:before { transform: translateX(24px); }
+
+    .card {
+      background: var(--light);
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      transition: box-shadow 0.2s ease;
+    }
+    .card:hover { box-shadow: 0 2px 8px rgba(67,84,212,0.08); }
+    .card-label { color: var(--slate); font-size: 13px; font-weight: 500; }
+    .card-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--navy);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill {
+      background: var(--light);
+      border: 1px solid var(--hairline);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--slate);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pill.active {
+      background: rgba(22,163,74,0.08);
+      border-color: rgba(22,163,74,0.25);
+      color: var(--success);
+    }
+
+    .schedule-field {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .schedule-field label { font-size: 13px; color: var(--dark-slate); font-weight: 500; }
+    .schedule-field input[type="datetime-local"] {
+      width: 100%;
+      background: var(--light);
+      border: 1px solid var(--hairline);
+      color: var(--body-text);
+      padding: 10px 12px;
+      border-radius: 10px;
+      outline: none;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .schedule-field input:focus {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px rgba(67,84,212,0.1);
+    }
+
+    .empty {
+      padding: 48px;
+      text-align: center;
+      color: var(--slate);
+      font-size: 14px;
+    }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--light); }
+    ::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--slate); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo-wrap">
+      <img src="64e32576ae89c46bfb5ed1c3_wohlighighres (1).webp" alt="Logo" class="logo" />
+    </div>
+    <div class="url-input">
+      <input id="url" type="text" placeholder="Optional: paste a URL to fetch external HTML…" autocomplete="off" />
+      <button class="btn primary" id="btnFetch" title="Run full pipeline and view report">Generate Report</button>
+      <button class="btn" id="btnDownload" title="Download the current HTML">Download</button>
+      <button class="btn" id="btnSettings" title="Open settings">Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="viewer">
+      <div class="tabs">
+        <button class="tab active" data-pane="previewPane">Preview</button>
+        <button class="tab" data-pane="sourcePane">Source</button>
+      </div>
+      <div id="previewPane" class="pane active">
+        <div class="empty" id="emptyState">
+          Click "Generate Report" to run the full pipeline:
+          <br>
+          Extract data → LLM Analysis → Generate HTML Report
+        </div>
+        <iframe id="previewFrame" class="preview" sandbox="allow-scripts allow-same-origin"></iframe>
+      </div>
+      <div id="sourcePane" class="pane">
+        <pre id="codeBlock" class="code"><code></code></pre>
+      </div>
+
+      <!-- Pipeline Progress Overlay -->
+      <div id="pipelineOverlay" class="pipeline-overlay">
+        <div class="pipeline-header">
+          <div class="pipeline-title">Pipeline Progress</div>
+          <div class="pipeline-close" id="pipelineClose">✕ Close</div>
+        </div>
+
+        <div class="pipeline-stages" id="pipelineStages">
+          <div class="stage-item pending" data-stage="drive_extract">
+            <div class="stage-icon">1</div>
+            <div class="stage-content">
+              <div class="stage-name">Fetch Excel from Google Drive</div>
+              <div class="stage-desc">Download and extract all sheet data</div>
+              <div class="stage-log" id="log_drive_extract">Waiting...</div>
+            </div>
+          </div>
+
+          <div class="stage-item pending" data-stage="llm_analysis">
+            <div class="stage-icon">2</div>
+            <div class="stage-content">
+              <div class="stage-name">LLM Analysis</div>
+              <div class="stage-desc">Send data to Ollama for workforce audit</div>
+              <div class="stage-log" id="log_llm_analysis">Waiting...</div>
+            </div>
+          </div>
+
+          <div class="stage-item pending" data-stage="report_service">
+            <div class="stage-icon">3</div>
+            <div class="stage-content">
+              <div class="stage-name">Generate HTML Report</div>
+              <div class="stage-desc">Render the final workforce report from template</div>
+              <div class="stage-log" id="log_report_service">Waiting...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-footer">
+          <div class="spinner" id="pipelineSpinner"></div>
+          <div class="pipeline-status" id="pipelineStatus">Ready to start...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span id="statusDot" class="dot"></span>
+      <span id="statusText">Ready</span>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settingsPanel" class="settings-panel">
+      <div class="panel-header">
+        <span>Settings</span>
+        <button class="btn" id="btnCloseSettings">Close</button>
+      </div>
+      <div class="panel-body">
+        <div class="section-title">Recipients</div>
+        <div class="email-list">
+          <button class="btn email-btn" data-email="aryan.gupta@wohlig.com">aryan.gupta@wohlig.com</button>
+          <!-- <button class="btn email-btn" data-email="chirag@wohlig.com">chirag@wohlig.com</button>
+          <button class="btn email-btn" data-email="jagruti@wohlig.com">jagruti@wohlig.com</button> -->
+        </div>
+
+        <div class="section-title">API Configuration</div>
+        <div class="card" style="margin-bottom:16px;">
+          <span class="card-label">Ollama</span>
+          <span class="card-value" style="font-size:12px; color:var(--slate);">Key loaded from .env</span>
+        </div>
+
+        <div class="section-title">Automation</div>
+        <div class="toggle-wrap">
+          <span class="toggle-label">Weekly Automation</span>
+          <label class="switch">
+            <input type="checkbox" id="autoToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="card-label">Status</span>
+          <span class="card-value">
+            <span class="pill" id="autoStatusPill">
+              <span class="dot" id="autoStatusDot"></span>
+              <span id="autoStatusText">Inactive</span>
+            </span>
+          </span>
+        </div>
+
+        <div class="card">
+          <span class="card-label">Next Run</span>
+          <span class="card-value" id="nextRunDisplay">Not scheduled</span>
+        </div>
+
+        <div class="schedule-field">
+          <label for="nextRunInput">Schedule next run (date &amp; time)</label>
+          <input id="nextRunInput" type="datetime-local" />
+        </div>
+
+        <div class="card" style="margin-top: 12px;">
+          <span class="card-label">Last Run</span>
+          <span class="pill" id="lastRunDisplay">No runs yet</span>
+        </div>
+      </div>
+      <div class="panel-footer">
+        <button class="btn" id="btnResetSettings">Reset defaults</button>
+        <button class="btn success" id="btnSaveSettings">Save</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    const els = {
+      url: $('#url'),
+      btnFetch: $('#btnFetch'),
+      btnDownload: $('#btnDownload'),
+      btnSettings: $('#btnSettings'),
+      previewPane: $('#previewPane'),
+      sourcePane: $('#sourcePane'),
+      previewFrame: $('#previewFrame'),
+      codeBlock: $('#codeBlock'),
+      emptyState: $('#emptyState'),
+      statusDot: $('#statusDot'),
+      statusText: $('#statusText'),
+      settingsPanel: $('#settingsPanel'),
+      btnCloseSettings: $('#btnCloseSettings'),
+      btnSaveSettings: $('#btnSaveSettings'),
+      btnResetSettings: $('#btnResetSettings'),
+      autoToggle: $('#autoToggle'),
+      autoStatusPill: $('#autoStatusPill'),
+      autoStatusDot: $('#autoStatusDot'),
+      autoStatusText: $('#autoStatusText'),
+      nextRunDisplay: $('#nextRunDisplay'),
+      nextRunInput: $('#nextRunInput'),
+      lastRunDisplay: $('#lastRunDisplay'),
+      // Pipeline elements
+      pipelineOverlay: $('#pipelineOverlay'),
+      pipelineStages: $('#pipelineStages'),
+      pipelineStatus: $('#pipelineStatus'),
+      pipelineSpinner: $('#pipelineSpinner'),
+      pipelineClose: $('#pipelineClose'),
+    };
+
+    let currentHtml = '';
+    let currentUrl = '';
+
+    function fmtDate(d) {
+      if (!d) return 'Not scheduled';
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return 'Not scheduled';
+      const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      return `${date.toLocaleDateString(undefined, opts)} at ${time} ${tz}`;
+    }
+
+    function fmtLastRun(d) {
+      if (!d) return 'No runs yet';
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return 'No runs yet';
+      const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false };
+      return date.toLocaleString(undefined, opts);
+    }
+
+    function loadSettings() {
+      const s = JSON.parse(localStorage.getItem('htmlViewerSettings') || '{}');
+      const activeEmails = s.emails || [];
+      $$('.email-btn').forEach(btn => {
+        btn.classList.toggle('active', activeEmails.includes(btn.dataset.email));
+      });
+      els.autoToggle.checked = !!s.automationEnabled;
+      els.nextRunInput.value = s.nextRun || '';
+      updateAutomationUI();
+      return s;
+    }
+
+    function saveSettings() {
+      const activeEmails = $$('.email-btn.active').map(b => b.dataset.email);
+      const s = {
+        emails: activeEmails,
+        automationEnabled: els.autoToggle.checked,
+        nextRun: els.nextRunInput.value || '',
+        lastRun: (JSON.parse(localStorage.getItem('htmlViewerSettings') || '{}')).lastRun || null,
+      };
+      localStorage.setItem('htmlViewerSettings', JSON.stringify(s));
+      return s;
+    }
+
+    function updateAutomationUI() {
+      const enabled = els.autoToggle.checked;
+      els.autoStatusText.textContent = enabled ? 'Active' : 'Inactive';
+      els.autoStatusPill.className = 'pill ' + (enabled ? 'active' : '');
+      els.autoStatusDot.className = 'dot ' + (enabled ? 'ok' : '');
+      const next = els.nextRunInput.value;
+      els.nextRunDisplay.textContent = enabled && next ? fmtDate(next) : 'Not scheduled';
+    }
+
+    function setStatus(text, type = '') {
+      els.statusText.textContent = text;
+      els.statusDot.className = 'dot ' + (type || '');
+    }
+
+    function showHtml(html, url = '') {
+      currentHtml = html;
+      currentUrl = url || '';
+      if (!html) {
+        els.emptyState.style.display = '';
+        els.previewFrame.style.display = 'none';
+        els.codeBlock.querySelector('code').textContent = '';
+        return;
+      }
+      els.emptyState.style.display = 'none';
+      els.previewFrame.style.display = 'block';
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const objectUrl = URL.createObjectURL(blob);
+      els.previewFrame.src = objectUrl;
+      els.previewFrame.onload = () => { try { URL.revokeObjectURL(objectUrl); } catch {} };
+
+      els.codeBlock.querySelector('code').textContent = html;
+      setStatus(url ? `Fetched: ${url}` : 'Loaded from input', 'ok');
+    }
+
+    // ==========================================
+    // PIPELINE PROGRESS UI
+    // ==========================================
+
+    function resetPipelineUI() {
+      $$('.stage-item').forEach(item => {
+        item.className = 'stage-item pending';
+      });
+      $$('.stage-log').forEach(log => {
+        log.textContent = 'Waiting...';
+      });
+      els.pipelineStatus.textContent = 'Starting pipeline...';
+      els.pipelineStatus.className = 'pipeline-status';
+      els.pipelineSpinner.style.display = 'block';
+    }
+
+    function setStageStatus(stage, status, message) {
+      const item = $(`.stage-item[data-stage="${stage}"]`);
+      const log = $(`#log_${stage}`);
+      if (!item) return;
+
+      item.classList.remove('pending', 'running', 'completed', 'error');
+      item.classList.add(status);
+
+      if (log) {
+        const current = log.textContent;
+        if (current === 'Waiting...') {
+          log.textContent = message;
+        } else {
+          log.textContent = current + '\n' + message;
+        }
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+
+    function openPipeline() {
+      resetPipelineUI();
+      els.pipelineOverlay.classList.add('active');
+    }
+
+    function closePipeline() {
+      els.pipelineOverlay.classList.remove('active');
+    }
+
+    async function runPipeline() {
+      els.btnFetch.disabled = true;
+      openPipeline();
+      setStatus('Running pipeline...', '');
+
+      try {
+        const res = await fetch('/api/run-pipeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+
+        if (res.status === 404 || res.status === 405) {
+          els.pipelineStatus.textContent = 'Backend server not running';
+          els.pipelineStatus.className = 'pipeline-status error';
+          els.pipelineSpinner.style.display = 'none';
+          setStatus('Backend not running. Start server: python app.py', 'err');
+          els.btnFetch.disabled = false;
+          return;
+        }
+
+        // Handle SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete line
+
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6);
+            if (!dataStr) continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (data.stage === 'pipeline') {
+                // Final result
+                if (data.status === 'success') {
+                  els.pipelineStatus.textContent = 'Report generated successfully!';
+                  els.pipelineStatus.className = 'pipeline-status success';
+                  els.pipelineSpinner.style.display = 'none';
+                  showHtml(data.html, 'Generated Report');
+                  setStatus('Report generated successfully', 'ok');
+
+                  // Record last run
+                  const s = JSON.parse(localStorage.getItem('htmlViewerSettings') || '{}');
+                  s.lastRun = new Date().toISOString();
+                  localStorage.setItem('htmlViewerSettings', JSON.stringify(s));
+                  els.lastRunDisplay.textContent = fmtLastRun(s.lastRun);
+
+                  // Auto-close after 2 seconds
+                  setTimeout(closePipeline, 2000);
+                } else if (data.status === 'failed') {
+                  els.pipelineStatus.textContent = 'Pipeline failed: ' + (data.message || 'Unknown error');
+                  els.pipelineStatus.className = 'pipeline-status error';
+                  els.pipelineSpinner.style.display = 'none';
+                  setStatus('Pipeline failed: ' + (data.message || ''), 'err');
+                }
+              } else {
+                // Stage update
+                setStageStatus(data.stage, data.status, data.message || '');
+                if (data.status === 'running') {
+                  els.pipelineStatus.textContent = `${data.stage}: ${data.message || 'Running...'}`;
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE data:', dataStr, e);
+            }
+          }
+        }
+
+      } catch (err) {
+        if (err.message.includes('Failed to fetch')) {
+          els.pipelineStatus.textContent = 'Cannot connect to server';
+          els.pipelineStatus.className = 'pipeline-status error';
+          els.pipelineSpinner.style.display = 'none';
+          setStatus('Backend not running. Start server: python app.py', 'err');
+        } else {
+          els.pipelineStatus.textContent = 'Error: ' + err.message;
+          els.pipelineStatus.className = 'pipeline-status error';
+          els.pipelineSpinner.style.display = 'none';
+          setStatus(`Error: ${err.message}`, 'err');
+        }
+      } finally {
+        els.btnFetch.disabled = false;
+      }
+    }
+
+    function downloadHtml() {
+      if (!currentHtml) { setStatus('Nothing to download', 'err'); return; }
+      const blob = new Blob([currentHtml], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'page.html';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setStatus('Downloaded: page.html', 'ok');
+    }
+
+    function openSettings() {
+      els.settingsPanel.classList.add('open');
+      const s = JSON.parse(localStorage.getItem('htmlViewerSettings') || '{}');
+      els.lastRunDisplay.textContent = fmtLastRun(s.lastRun);
+    }
+    function closeSettings() { els.settingsPanel.classList.remove('open'); }
+
+    // Tabs
+    $$('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        $$('.tab').forEach(t => t.classList.remove('active'));
+        $$('.pane').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        $(`#${tab.dataset.pane}`).classList.add('active');
+      });
+    });
+
+    els.btnFetch.addEventListener('click', runPipeline);
+    els.url.addEventListener('keydown', (e) => { if (e.key === 'Enter') runPipeline(); });
+    els.btnDownload.addEventListener('click', downloadHtml);
+    els.btnSettings.addEventListener('click', openSettings);
+    els.btnCloseSettings.addEventListener('click', closeSettings);
+    els.btnSaveSettings.addEventListener('click', () => { saveSettings(); updateAutomationUI(); closeSettings(); setStatus('Settings saved', 'ok'); });
+    els.btnResetSettings.addEventListener('click', () => {
+      $$('.email-btn').forEach(b => b.classList.remove('active'));
+      els.autoToggle.checked = false;
+      els.nextRunInput.value = '';
+      const s = { emails: [], automationEnabled: false, nextRun: '', lastRun: null };
+      localStorage.setItem('htmlViewerSettings', JSON.stringify(s));
+      updateAutomationUI();
+      els.lastRunDisplay.textContent = 'No runs yet';
+    });
+    els.pipelineClose.addEventListener('click', closePipeline);
+
+    // Email buttons toggle
+    $$('.email-btn').forEach(btn => {
+      btn.addEventListener('click', () => btn.classList.toggle('active'));
+    });
+
+    els.autoToggle.addEventListener('change', updateAutomationUI);
+    els.nextRunInput.addEventListener('change', updateAutomationUI);
+
+    // Close settings when clicking outside
+    document.addEventListener('click', (e) => {
+      if (els.settingsPanel.classList.contains('open') && !els.settingsPanel.contains(e.target) && !els.btnSettings.contains(e.target)) {
+        closeSettings();
+      }
+    });
+
+    loadSettings();
+  </script>
+</body>
+</html>

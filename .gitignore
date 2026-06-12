@@ -1,0 +1,14 @@
+.vercel
+.env
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!next.config.json
+!vercel.json
+.venv/
+__pycache__/
+node_modules/
+.next/
+reports/
+data/
