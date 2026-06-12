@@ -80,41 +80,117 @@ def _run_pipeline_sync():
 
 
 def _generate_report_pdf():
-    if not REPORT_HTML.exists():
-        ok, _, _ = _run_pipeline_sync()
-        if not ok:
+    try:
+        print("[DEBUG] Checking if report HTML exists...")
+        if not REPORT_HTML.exists():
+            print("[DEBUG] HTML not found, running pipeline...")
+            ok, out, err = _run_pipeline_sync()
+            print(f"[DEBUG] Pipeline output:\n{out}")
+            if err:
+                print(f"[DEBUG] Pipeline errors:\n{err}")
+            if not ok:
+                print("[ERROR] Pipeline execution failed")
+                return False
+        
+        if not REPORT_HTML.exists():
+            print(f"[ERROR] Report HTML still not found at {REPORT_HTML}")
             return False
-    if not REPORT_HTML.exists():
+        
+        print("[DEBUG] Generating PDF...")
+        ok = generate_pdf(str(REPORT_HTML), str(REPORT_PDF))
+        if not ok:
+            print("[ERROR] PDF generation failed")
+            return False
+        
+        print(f"[DEBUG] PDF created at {REPORT_PDF}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] _generate_report_pdf exception: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-    ok = generate_pdf(str(REPORT_HTML), str(REPORT_PDF))
-    return ok
 
 
 def _scheduled_job():
-    settings = load_settings()
-    if not check_schedule_action(settings):
-        return
-
-    # Generation Phase
-    ok = _generate_report_pdf()
-    if not ok:
-        return
-
-    # Sending Phase
-    recipients = settings.get("recipients", [])
-    if not recipients:
-        return
-
-    send_email_with_pdf(
-        recipients=recipients,
-        subject=settings.get("subject", "Company report"),
-        body_line=settings.get("body_line", "Please find the attached company workforce report."),
-        html_path=str(REPORT_HTML),
-        pdf_path=str(REPORT_PDF),
-    )
+    try:
+        print("\n" + "="*60)
+        print("[SCHEDULER] Starting scheduled job")
+        print("="*60)
         
-    # Reset state after sending
-    settings["last_run"] = datetime.now().isoformat()
+        settings = load_settings()
+        print(f"[SCHEDULER] Loaded settings: active={settings.get('active')}, last_run={settings.get('last_run')}, next_run={settings.get('next_run')}")
+        
+        if not check_schedule_action(settings):
+            print("[SCHEDULER] Condition not met to run (not active or not time yet)")
+            return
+
+        print("[SCHEDULER] ✓ Condition passed, starting job")
+        
+        # Generation Phase
+        ok = _generate_report_pdf()
+        if not ok:
+            print("[SCHEDULER] ✗ Failed to generate PDF")
+            return
+        
+        print("[SCHEDULER] ✓ PDF generated")
+
+        # Sending Phase
+        recipients = settings.get("recipients", [])
+        if not recipients:
+            print("[SCHEDULER] ✗ No recipients configured")
+            return
+        
+        print(f"[SCHEDULER] Sending to: {recipients}")
+
+        result = send_email_with_pdf(
+            recipients=recipients,
+            subject=settings.get("subject", "Company report"),
+            body_line=settings.get("body_line", "Please find the attached company workforce report."),
+            html_path=str(REPORT_HTML),
+            pdf_path=str(REPORT_PDF),
+        )
+        
+        if result.get("success"):
+            print("[SCHEDULER] ✓ Email sent successfully")
+        else:
+            print(f"[SCHEDULER] ✗ Email failed: {result.get('error')}")
+            
+        # Reset state after sending
+        settings["last_run"] = datetime.now().isoformat()
+
+        # Calculate next_run
+        if settings.get("continuous"):
+            cron_expr = settings.get("cron_expression")
+            if cron_expr:
+                try:
+                    from croniter import croniter
+                    now_local = datetime.now()
+                    cron = croniter(cron_expr, now_local)
+                    next_t = cron.get_next(datetime)
+                    settings["next_run"] = next_t.isoformat()
+                except Exception as e:
+                    print(f"[SCHEDULER] Failed to calculate cron: {e}")
+            else:
+                interval = settings.get("interval_hours", 24)
+                next_run = settings.get("next_run")
+                if next_run:
+                    try:
+                        dt = datetime.fromisoformat(next_run.replace("Z", "+00:00"))
+                        settings["next_run"] = (dt + timedelta(hours=interval)).isoformat()
+                    except Exception as e:
+                        print(f"[SCHEDULER] Failed to calculate next_run: {e}")
+        else:
+            settings["active"] = False
+
+        save_settings(settings)
+        print("[SCHEDULER] ✓ Settings saved")
+        print("="*60 + "\n")
+        
+    except Exception as e:
+        print(f"[SCHEDULER] FATAL ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        print("="*60 + "\n")
 
     # Calculate next_run
     if settings.get("continuous"):
@@ -161,6 +237,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ===========================
+# Background Scheduler (Local Development)
+# ===========================
+import threading
+import time
+
+scheduler_thread = None
+scheduler_stop = threading.Event()
+
+def background_scheduler():
+    """Run scheduler every minute (local dev only)"""
+    print("[BACKGROUND_SCHEDULER] Starting background scheduler...")
+    while not scheduler_stop.is_set():
+        try:
+            _scheduled_job()
+        except Exception as e:
+            print(f"[BACKGROUND_SCHEDULER] Error: {e}")
+        
+        # Sleep for 60 seconds (check every minute)
+        scheduler_stop.wait(60)
+    print("[BACKGROUND_SCHEDULER] Stopped")
+
+@app.on_event("startup")
+async def startup_event():
+    global scheduler_thread
+    # Only start background scheduler in local dev (not on Vercel)
+    if not os.environ.get("VERCEL"):
+        scheduler_thread = threading.Thread(target=background_scheduler, daemon=True)
+        scheduler_thread.start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global scheduler_thread
+    if scheduler_thread:
+        scheduler_stop.set()
+        scheduler_thread.join(timeout=5)
 
 
 # ===========================
@@ -281,14 +395,13 @@ def get_settings():
 @app.post("/api/settings")
 def update_settings(payload: SettingsPayload):
     old_settings = load_settings()
-    was_active = old_settings.get("active", False)
     
     settings = payload.dict()
     # Keep existing last_run
     settings["last_run"] = old_settings.get("last_run")
     
-    if payload.active and not was_active:
-        # Force immediate run
+    # Always force immediate run when active is enabled
+    if payload.active:
         settings["last_run"] = None
         
     save_settings(settings)

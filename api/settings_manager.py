@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "next_run": None,
     "stop_run": None,
     "continuous": False,
-    "active": False,
+    "active": True,
     "subject": "Company Workforce Report",
     "body_line": "Dear Team,\n\nPlease find the attached Company Workforce Report for your review.\n\nThis report summarizes the current workforce status, project allocations, and resource utilization across the organization.\n\nRegards,\n\nDhruv Solanki\nAryan Gupta",
     "interval_hours": 24,

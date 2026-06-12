@@ -62,6 +62,7 @@ export default function HomePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<'preview' | 'source'>('preview');
   const [status, setStatus] = useState<{ text: string; type: 'ok' | 'err' | '' }>({ text: 'Ready', type: '' });
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const [stages, setStages] = useState<Record<StageId, { status: StageStatus; log: string }>>({
     drive_extract: { status: 'pending', log: 'Waiting...' },
@@ -210,6 +211,10 @@ export default function HomePage() {
 
   /* ── Save Settings ── */
   const saveSettings = useCallback(async () => {
+    // Prevent double submissions
+    if (savingSettings) return;
+    setSavingSettings(true);
+    
     try {
       const res = await fetch('/api/settings', {
         method: 'POST',
@@ -220,10 +225,24 @@ export default function HomePage() {
       if (data) setSettings(prev => ({ ...prev, ...data }));
       setShowSettings(false);
       setStatus({ text: 'Settings saved', type: 'ok' });
+      
+      // Auto-trigger scheduler if active
+      if (settings.active) {
+        try {
+          const cronRes = await fetch('/api/cron');
+          const cronData = await cronRes.json();
+          console.log('Scheduler triggered:', cronData);
+          setStatus({ text: 'Settings saved & scheduler triggered', type: 'ok' });
+        } catch (err) {
+          console.error('Scheduler trigger error:', err);
+        }
+      }
     } catch (err: any) {
       setStatus({ text: `Save failed: ${err.message}`, type: 'err' });
+    } finally {
+      setSavingSettings(false);
     }
-  }, [settings]);
+  }, [settings, savingSettings]);
 
   const resetSettings = useCallback(() => {
     setSettings({

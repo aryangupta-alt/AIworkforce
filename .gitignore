@@ -1,5 +1,6 @@
 .vercel
 .env
+.DS_Store
 *.json
 !package.json
 !package-lock.json
