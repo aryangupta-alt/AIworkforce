@@ -1,15 +1,31 @@
-.vercel
+# Environment
 .env
-.DS_Store
-*.json
-!package.json
-!package-lock.json
-!tsconfig.json
-!next.config.json
-!vercel.json
 .venv/
+
+# OS
+.DS_Store
+
+# Python
 __pycache__/
+*.pyc
+
+# Node
 node_modules/
 .next/
-reports/
-data/
+
+# Vercel
+.vercel/
+
+# Generated files
+all_files_extracted_data.json
+api/schedule_settings.json
+
+# Generated data files
+data/*.json
+data/*.xlsx
+
+# Generated reports
+reports/*.html
+reports/*.pdf
+
+my-service-account.json

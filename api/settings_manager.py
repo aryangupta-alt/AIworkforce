@@ -82,15 +82,20 @@ def check_schedule_action(settings):
     stop_run = settings.get("stop_run")
     continuous = settings.get("continuous", False)
 
-    if stop_run and isinstance(stop_run, str) and not continuous:
+    if stop_run and isinstance(stop_run, str):
         try:
-            stop_run = datetime.fromisoformat(stop_run.replace("Z", "+00:00"))
-            if now >= stop_run:
+            stop_dt = datetime.fromisoformat(
+            stop_run.replace("Z", "+00:00")
+            )
+
+            if now >= stop_dt:
+                print(f"[SCHEDULER] Stop time reached: {stop_dt}")
                 settings["active"] = False
                 save_settings(settings)
                 return False
-        except Exception:
-            pass
+
+        except Exception as e:
+            print(f"[SCHEDULER] Stop run parse error: {e}")
 
     # Force immediate run if newly activated and last_run is cleared
     if not settings.get("last_run"):

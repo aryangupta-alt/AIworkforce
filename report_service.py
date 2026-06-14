@@ -1,5 +1,7 @@
 import json
 import math
+import os
+import base64
 from pathlib import Path
 from datetime import datetime
 from jinja2 import Template
@@ -8,14 +10,13 @@ from jinja2 import Template
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 
-import os
 JSON_FILE = Path(os.environ.get("OUTPUT_FILE", BASE_DIR / "data" / "workforce_analysis_output.json"))
 EXTRACTED_JSON_FILE = Path(os.environ.get("INPUT_FILE", BASE_DIR / "all_files_extracted_data.json"))
 TEMPLATE_FILE = BASE_DIR / "workforce_report_template.html"
 OUTPUT_FILE = Path(os.environ.get("REPORT_HTML", BASE_DIR / "reports" / "workforce_report.html"))
 
 
-# ── Dynamic helpers ───────────────────────────────────────────────────────────
+# ── Dynamic helpers ────────────────────────────────────────────────────────
 
 def _safe_get(record, *keys, default=""):
     """Case-insensitive, fallback-aware dict lookup."""
@@ -42,16 +43,6 @@ def _clean_str(val):
 def _load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-    print("========== DEBUG ==========")
-    print("JSON FILE:", JSON_FILE)
-
-    print("PROJECT ALLOCATIONS:")
-    print(json.dumps(data.get("project_allocations", {}), indent=2))
-
-    print("ACTIVE PROJECTS TABLE:")
-    print(json.dumps(data.get("active_projects_table", []), indent=2))
-
-    print("===========================")
 
 
 def _map_project_types(active_projects_table):
@@ -93,6 +84,7 @@ def _build_employee_lookup(extracted_data):
 
 
 # ── Report generation ──────────────────────────────────────────────────────
+
 def generate_report() -> None:
 
     # 1. Load analysis JSON from LLM
@@ -107,24 +99,36 @@ def generate_report() -> None:
     wfo = data.get("workforce_overview", {})
 
     active_employees = (
-        _safe_get(wfo, "total_filtered_employees", "total_active_employees", default=0)
-        or 0
+        _safe_get(wfo, "total_filtered_employees", "total_active_employees", default=0) or 0
     )
     current_projects = _safe_get(wfo, "total_active_projects", default=0) or 0
     unallocated_employees = (
-        _safe_get(wfo, "total_unallocated_employees", "total_bench_employees", default=0)
-        or 0
+        _safe_get(wfo, "total_unallocated_employees", "total_bench_employees", default=0) or 0
     )
 
     # 3. Categorise allocations using type metadata from active_projects_table
     proj_type_map = _map_project_types(data.get("active_projects_table", []))
     flat_allocations = data.get("project_allocations", {})
 
-    projects, retainers, internal = [], [], []
+    print("\n===== PROJECT TYPES =====")
+    print(json.dumps(proj_type_map, indent=2))
+
+    print("\n===== PROJECT ALLOCATIONS =====")
+    print(json.dumps(flat_allocations, indent=2))
+
+    projects = []
+    retainers = []
+    internal = []
 
     for proj_name in flat_allocations.keys():
-        ptype = proj_type_map.get(proj_name.lower().strip(), "Project")
+        ptype = proj_type_map.get(proj_name.lower().strip())
+
+        if not ptype:
+            print(f"Skipping unknown project: {proj_name}")
+            continue
+
         entry = {"project_name": proj_name}
+
         if ptype.lower() == "project":
             projects.append(entry)
         elif ptype.lower() in ("retainer", "retainers"):
@@ -155,11 +159,23 @@ def generate_report() -> None:
     }
 
     # 4. Project allocation summary (Section 02 cards)
-    #    Include every project in project_allocations.
     project_allocation_summary = []
-    for proj_name, employees in flat_allocations.items():
+    for project in data.get("active_projects_table", []):
+        project_name = (
+            project.get("Project Name")
+            or project.get("project_name")
+        )
+        if not project_name:
+            continue
+
+        employees = []
+        for alloc_name, alloc_employees in flat_allocations.items():
+            if alloc_name.strip().lower() == project_name.strip().lower():
+                employees = alloc_employees
+                break
+
         project_allocation_summary.append({
-            "project_name": proj_name,
+            "project_name": project_name,
             "employee_count": len(employees),
             "employees": employees,
         })
@@ -171,29 +187,28 @@ def generate_report() -> None:
     unallocated_employee_list = []
 
     for item in raw_unallocated:
-
-     if isinstance(item, dict):
+        if isinstance(item, dict):
             name = (
-            item.get("name")
-            or item.get("employee_name")
-            or item.get("Employee Name")
-            or item.get("Active Employee")
-            or ""
-        )
-     else:
-        name = str(item)
+                item.get("name")
+                or item.get("employee_name")
+                or item.get("Employee Name")
+                or item.get("Active Employee")
+                or ""
+            )
+        else:
+            name = str(item)
 
-    info = emp_lookup.get(name, {})
+        info = emp_lookup.get(name, {})
 
-    unallocated_employee_list.append({
-        "name": name,
-        "current_role": info.get("current_role", "—"),
-        "reporting_to": info.get("reporting_to", "—"),
-    })
+        unallocated_employee_list.append({
+            "name": name,
+            "current_role": info.get("current_role", "—"),
+            "reporting_to": info.get("reporting_to", "—"),
+        })
 
     generated_date = datetime.now().strftime("%d %B %Y")
 
-    import base64
+    # 6. Embed logo as base64
     logo_file = BASE_DIR / "ui" / "64e32576ae89c46bfb5ed1c3_wohlighighres (1).webp"
     logo_data_uri = ""
     if logo_file.exists():
@@ -201,7 +216,7 @@ def generate_report() -> None:
             b64 = base64.b64encode(lf.read()).decode("utf-8")
             logo_data_uri = f"data:image/webp;base64,{b64}"
 
-    # 6. Render HTML
+    # 7. Render HTML
     with open(TEMPLATE_FILE, "r", encoding="utf-8") as f:
         template = Template(f.read())
 
@@ -213,7 +228,7 @@ def generate_report() -> None:
         logo_data_uri=logo_data_uri,
     )
 
-    # 7. Write output
+    # 8. Write output
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(html)

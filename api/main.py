@@ -192,32 +192,6 @@ def _scheduled_job():
         traceback.print_exc()
         print("="*60 + "\n")
 
-    # Calculate next_run
-    if settings.get("continuous"):
-        cron_expr = settings.get("cron_expression")
-        if cron_expr:
-            try:
-                from croniter import croniter
-                now_local = datetime.now()
-                cron = croniter(cron_expr, now_local)
-                next_t = cron.get_next(datetime)
-                settings["next_run"] = next_t.isoformat()
-            except Exception:
-                pass
-        else:
-            interval = settings.get("interval_hours", 24)
-            next_run = settings.get("next_run")
-            if next_run:
-                try:
-                    dt = datetime.fromisoformat(next_run.replace("Z", "+00:00"))
-                    settings["next_run"] = (dt + timedelta(hours=interval)).isoformat()
-                except Exception:
-                    pass
-    else:
-        settings["active"] = False
-
-    save_settings(settings)
-
 # Removed BackgroundScheduler for Vercel Serverless
 app = FastAPI(title="Pipeline API")
 
@@ -395,16 +369,16 @@ def get_settings():
 @app.post("/api/settings")
 def update_settings(payload: SettingsPayload):
     old_settings = load_settings()
-    
+
     settings = payload.dict()
-    # Keep existing last_run
+
     settings["last_run"] = old_settings.get("last_run")
-    
-    # Always force immediate run when active is enabled
-    if payload.active:
+
+    if payload.active and not old_settings.get("active"):
         settings["last_run"] = None
-        
+
     save_settings(settings)
+
     return {"status": "ok"}
 
 
