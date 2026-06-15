@@ -97,9 +97,7 @@ def check_schedule_action(settings):
         except Exception as e:
             print(f"[SCHEDULER] Stop run parse error: {e}")
 
-    # Force immediate run if newly activated and last_run is cleared
-    if not settings.get("last_run"):
-        return True
+    
 
     if next_run and isinstance(next_run, str):
         try:

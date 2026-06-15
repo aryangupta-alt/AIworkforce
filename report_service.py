@@ -46,15 +46,30 @@ def _load_json(path):
 
 
 def _map_project_types(active_projects_table):
-    """
-    Build a mapping: normalized project name -> type metadata.
-    Handles any key casing the LLM may emit.
-    """
     mapping = {}
+
     for proj in active_projects_table or []:
-        name = _clean_str(_safe_get(proj, "project_name", "Project Name"))
-        ptype = _clean_str(_safe_get(proj, "type", "Type")) or "Project"
-        mapping[name.lower()] = ptype
+
+        name = _clean_str(
+            _safe_get(
+                proj,
+                "project",
+                "project_name",
+                "Project Name"
+            )
+        )
+
+        ptype = _clean_str(
+            _safe_get(
+                proj,
+                "type",
+                "Type"
+            )
+        ) or "Project"
+
+        if name:
+            mapping[name.lower()] = ptype
+
     return mapping
 
 
@@ -98,17 +113,44 @@ def generate_report() -> None:
     # 2. Workforce overview – normalise varying LLM key names
     wfo = data.get("workforce_overview", {})
 
-    active_employees = (
-        _safe_get(wfo, "total_filtered_employees", "total_active_employees", default=0) or 0
+    active_employees = len(
+    data.get("active_employees_filtered_list", [])
     )
-    current_projects = _safe_get(wfo, "total_active_projects", default=0) or 0
-    unallocated_employees = (
-        _safe_get(wfo, "total_unallocated_employees", "total_bench_employees", default=0) or 0
+    current_projects = len(
+    data.get("active_projects_table", [])
+    )
+    unallocated_employees = len(
+    data.get("unallocated_employees", [])
     )
 
+    
     # 3. Categorise allocations using type metadata from active_projects_table
+    
     proj_type_map = _map_project_types(data.get("active_projects_table", []))
-    flat_allocations = data.get("project_allocations", {})
+
+    allocations = data.get("project_allocations", {})
+
+    flat_allocations = {}
+
+    # New Gemini structure
+    if "projects" in allocations:
+        flat_allocations.update(
+        allocations.get("projects", {})
+        )
+
+    if "retainers" in allocations:
+        flat_allocations.update(
+        allocations.get("retainers", {})
+        )
+
+    if "internal" in allocations:
+        flat_allocations.update(
+        allocations.get("internal", {})
+        )
+
+    # Old Ollama structure
+    if not flat_allocations:
+        flat_allocations = allocations
 
     print("\n===== PROJECT TYPES =====")
     print(json.dumps(proj_type_map, indent=2))
@@ -162,8 +204,9 @@ def generate_report() -> None:
     project_allocation_summary = []
     for project in data.get("active_projects_table", []):
         project_name = (
-            project.get("Project Name")
+            project.get("project")
             or project.get("project_name")
+            or project.get("Project Name")
         )
         if not project_name:
             continue

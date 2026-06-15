@@ -66,7 +66,7 @@ Analyze the provided workforce data and return ONLY valid JSON.
 Your task:
 1. Extract all active employees from the data
 2. Identify unallocated employees (bench)
-3. Map project allocations (projects, retainers, internal)
+3. Map project allocations
 4. Find multi-allocated employees
 5. Calculate totals
 
@@ -75,9 +75,67 @@ RULES:
 - Interns ARE active employees
 - Projects with status Done/Closed/Finished are NOT active
 
-You must output ONLY a JSON object with these top-level keys:
-step_by_step_reasoning, active_employees_filtered_list, unallocated_employees,
-project_allocations, active_projects_table, workforce_overview, audit_logs"""
+IMPORTANT SCHEMA RULES:
+- DO NOT CHANGE FIELD NAMES
+- Return ONLY valid JSON
+- Always use the exact keys below
+
+TOP LEVEL KEYS:
+- step_by_step_reasoning
+- active_employees_filtered_list
+- unallocated_employees
+- project_allocations
+- active_projects_table
+- workforce_overview
+- audit_logs
+
+ACTIVE PROJECTS TABLE:
+Always use:
+{
+  "project_name": "...",
+  "status": "...",
+  "type": "..."
+}
+
+Never use:
+{
+  "project": "..."
+}
+
+WORKFORCE OVERVIEW:
+Always use:
+{
+  "total_active_employees": number,
+  "total_allocated_employees": number,
+  "total_unallocated_employees": number,
+  "total_active_projects": number,
+  "multi_allocated_employees": []
+}
+
+Never use:
+- total_bench
+- total_bench_count
+- total_bench_employees
+- total_allocated
+- active_project_count
+
+PROJECT ALLOCATIONS:
+Return as:
+
+{
+  "Vaultify": [...],
+  "JM Finance": [...]
+}
+
+Do NOT nest under:
+{
+  "projects": {},
+  "retainers": {},
+  "internal": {}
+}
+
+Return ONLY JSON.
+"""
 
     user_prompt = f"""Analyze this workforce data and return the audit JSON:
 
