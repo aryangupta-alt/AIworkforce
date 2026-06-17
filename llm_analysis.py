@@ -12,24 +12,43 @@ load_dotenv()
 # ==========================================
 # ADAPTIVE CONFIGURATION (no hardcoding)
 # ==========================================
+BASE_DIR = Path(__file__).resolve().parent
+
 MODEL_NAME = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
-INPUT_FILE = os.environ.get("INPUT_FILE", "all_files_extracted_data.json")
-OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "data/workforce_analysis_output.json")
+
+env_input = os.environ.get("INPUT_FILE")
+if env_input:
+    ip = Path(env_input)
+    INPUT_FILE = str(ip if ip.is_absolute() else BASE_DIR / ip)
+else:
+    INPUT_FILE = str(BASE_DIR / "all_files_extracted_data.json")
+
+env_output = os.environ.get("OUTPUT_FILE")
+if env_output:
+    op = Path(env_output)
+    OUTPUT_FILE = str(op if op.is_absolute() else BASE_DIR / op)
+else:
+    OUTPUT_FILE = str(BASE_DIR / "data" / "workforce_analysis_output.json")
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "https://ollama.com")
 USE_CHAT_API = os.environ.get("OLLAMA_USE_CHAT", "false").lower() in ("true", "1", "yes")
 
 _api_key = os.environ.get('OLLAMA_API_KEY', '')
-if not _api_key:
-    print("[ERROR] OLLAMA_API_KEY not found in .env file.")
-    print("        Please add: OLLAMA_API_KEY=your-key-here")
-    sys.exit(1)
+_client = None
 
-client = Client(
-    host=OLLAMA_HOST,
-    headers={'Authorization': f'Bearer {_api_key}'}
-)
-print(f"[INFO] Connected to Ollama at: {OLLAMA_HOST}")
-print(f"[INFO] Model: {MODEL_NAME} | API: {'chat' if USE_CHAT_API else 'generate'}")
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.environ.get('OLLAMA_API_KEY', '')
+        if not api_key:
+            raise RuntimeError("OLLAMA_API_KEY not found in .env file. Please add: OLLAMA_API_KEY=your-key-here")
+        _client = Client(
+            host=OLLAMA_HOST,
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        print(f"[INFO] Connected to Ollama at: {OLLAMA_HOST}")
+        print(f"[INFO] Model: {MODEL_NAME} | API: {'chat' if USE_CHAT_API else 'generate'}")
+    return _client
 
 
 # ==========================================
@@ -41,11 +60,9 @@ def load_input_data(filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"[ERROR] Could not find {filepath}. Run drive_extract.py first.")
-        sys.exit(1)
+        raise RuntimeError(f"[ERROR] Could not find {filepath}. Run drive_extract.py first.")
     except json.JSONDecodeError:
-        print(f"[ERROR] {filepath} is not valid JSON.")
-        sys.exit(1)
+        raise RuntimeError(f"[ERROR] {filepath} is not valid JSON.")
 
 
 # ==========================================
@@ -66,82 +83,48 @@ Analyze the provided workforce data and return ONLY valid JSON.
 Your task:
 1. Extract all active employees from the data
 2. Identify unallocated employees (bench)
-3. Map project allocations
+3. Map project allocations (projects, retainers, internal)
 4. Find multi-allocated employees
 5. Calculate totals
 
 RULES:
 - Tech Leads should NOT appear in unallocated list
 - Interns ARE active employees
-- Projects with status Done/Closed/Finished are NOT active
+- You MUST COMPLETELY EXCLUDE any projects with status "Done", "Closed", or "Finished" from ALL sections (active_projects_table, project_allocations, etc.). Do not list them.
+- Completely EXCLUDE "GenAI Learning Task" and "Learning Task" from ALL sections. Do not list them in active_projects_table or project_allocations. Do NOT put the employees assigned to these tasks in the unallocated_employees list. Simply ignore these tasks and their assigned employees.
+- Ensure EVERY unique active project found in the "Current Project" column is included in "active_projects_table".
+- Employees assigned to MULTIPLE active projects must be reflected in the "Project Allocation Summary" under EACH project they are allocated to. Do NOT limit an employee to a single project entry. If an employee has allocations across multiple active projects, count and display them in every relevant project's allocation summary according to their allocation percentage.
 
-IMPORTANT SCHEMA RULES:
-- DO NOT CHANGE FIELD NAMES
-- Return ONLY valid JSON
-- Always use the exact keys below
+STRICT OUTPUT SCHEMA — You MUST follow these exact formats:
 
-TOP LEVEL KEYS:
-- step_by_step_reasoning
-- active_employees_filtered_list
-- unallocated_employees
-- project_allocations
-- active_projects_table
-- workforce_overview
-- audit_logs
+1. "active_employees_filtered_list": a FLAT list of name strings.
+   Example: ["Pratik Sawant", "Osama Patel"]
 
-ACTIVE PROJECTS TABLE:
-Always use:
-{
-  "project_name": "...",
-  "status": "...",
-  "type": "..."
-}
+2. "unallocated_employees": a list of objects with "name" and "reason" keys.
+   Example: [{"name": "Hanishka Jain", "reason": "Assigned to closed project 'Pocket Studio'"}]
 
-Never use:
-{
-  "project": "..."
-}
+3. "project_allocations": a dict where keys are project names and values are FLAT lists of employee name strings. Do NOT use objects/dicts for employees here.
+   Example: {"Vaultify": ["Pratik Sawant", "Agam Shah"], "ZEE5": ["Samay Gada"]}
 
-WORKFORCE OVERVIEW:
-Always use:
-{
-  "total_active_employees": number,
-  "total_allocated_employees": number,
-  "total_unallocated_employees": number,
-  "total_active_projects": number,
-  "multi_allocated_employees": []
-}
+4. "active_projects_table": a list of objects with keys: "name", "type", "client", "start_date", "end_date", "status".
+   - "type" must be one of: "Project", "Retainer", "Internal"
+   Example: [{"name": "Vaultify", "type": "Retainer", "client": "VATSAL DESAI", "start_date": "2026-02-09", "end_date": null, "status": "In Progress"}]
 
-Never use:
-- total_bench
-- total_bench_count
-- total_bench_employees
-- total_allocated
-- active_project_count
+5. "workforce_overview": an object with keys: "total_active_employees" (int), "total_unallocated_employees" (int), "total_active_projects" (int), "multi_allocated_employees" (list of name strings).
 
-PROJECT ALLOCATIONS:
-Return as:
+6. "audit_logs": a list of strings describing data issues found.
 
-{
-  "Vaultify": [...],
-  "JM Finance": [...]
-}
+7. "step_by_step_reasoning": a string explaining your analysis.
 
-Do NOT nest under:
-{
-  "projects": {},
-  "retainers": {},
-  "internal": {}
-}
-
-Return ONLY JSON.
-"""
+You must output ONLY a JSON object with these top-level keys:
+step_by_step_reasoning, active_employees_filtered_list, unallocated_employees,
+project_allocations, active_projects_table, workforce_overview, audit_logs"""
 
     user_prompt = f"""Analyze this workforce data and return the audit JSON:
 
 {data_string}
 
-Return ONLY valid JSON matching the expected schema."""
+Return ONLY valid JSON matching the expected schema. Follow the STRICT OUTPUT SCHEMA exactly."""
 
     return system_prompt, user_prompt
 
@@ -208,7 +191,7 @@ def call_llm(system_prompt, user_prompt):
     if not USE_CHAT_API:
         try:
             print("[LLM] Trying generate API...")
-            response = client.generate(
+            response = _get_client().generate(
                 model=MODEL_NAME,
                 system=system_prompt,
                 prompt=user_prompt,
@@ -250,7 +233,7 @@ def call_llm(system_prompt, user_prompt):
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_prompt}
         ]
-        response = client.chat(
+        response = _get_client().chat(
             model=MODEL_NAME,
             messages=messages,
             options={'temperature': 0.1}
@@ -312,27 +295,20 @@ def run_audit(input_file=None, output_file=None):
         raw_response = call_llm(system_prompt, user_prompt)
 
         if not raw_response or not raw_response.strip():
-            print("[ERROR] LLM returned empty response.")
-            sys.exit(1)
+            raise RuntimeError("[ERROR] LLM returned empty response.")
 
         print(f"[INFO] LLM response length: {len(raw_response)} chars")
 
         # Extract JSON
         clean_json = extract_json_from_response(raw_response)
         if not clean_json:
-            print("[ERROR] Could not extract valid JSON from LLM response.")
-            print("[DEBUG] Raw response preview:")
-            print(raw_response[:500])
-            sys.exit(1)
+            raise RuntimeError("[ERROR] Could not extract valid JSON from LLM response.\n[DEBUG] Raw response preview:\n" + raw_response[:500])
 
         # Parse and validate
         try:
             parsed_json = json.loads(clean_json)
         except json.JSONDecodeError as e:
-            print(f"[ERROR] JSON parse error: {e}")
-            print("[DEBUG] Extracted JSON preview:")
-            print(clean_json[:500])
-            sys.exit(1)
+            raise RuntimeError(f"[ERROR] JSON parse error: {e}\n[DEBUG] Extracted JSON preview:\n{clean_json[:500]}")
 
         # Validate required keys exist
         required_keys = [
@@ -357,15 +333,14 @@ def run_audit(input_file=None, output_file=None):
         return output_path
 
     except ResponseError as e:
-        print(f"[ERROR] Ollama API error (status {e.status_code}): {e.error}")
+        hint = ""
         if e.status_code == 401:
-            print("[HINT] Your OLLAMA_API_KEY may be invalid or expired.")
+            hint = "[HINT] Your OLLAMA_API_KEY may be invalid or expired."
         elif e.status_code == 404:
-            print(f"[HINT] Model '{MODEL_NAME}' not found. Check available models.")
-        sys.exit(1)
+            hint = f"[HINT] Model '{MODEL_NAME}' not found. Check available models."
+        raise RuntimeError(f"[ERROR] Ollama API error (status {e.status_code}): {e.error}\n{hint}")
     except Exception as e:
-        print(f"[ERROR] {type(e).__name__}: {e}")
-        sys.exit(1)
+        raise RuntimeError(f"[ERROR] {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":

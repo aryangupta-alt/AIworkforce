@@ -4,14 +4,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image';
 
 /* ── Types ── */
-type StageId = 'drive_extract' | 'llm_analysis' | 'report_service';
+type StageId = 'drive_extract' | 'llm_analysis' | 'report_service' | 'email';
 type StageStatus = 'pending' | 'running' | 'completed' | 'error';
+
+interface OutputFile {
+  name: string;
+  exists: boolean;
+  size: number;
+}
 
 interface PipelineEvent {
   stage: StageId | 'pipeline';
   status: StageStatus | 'success' | 'failed';
   message?: string;
   html?: string;
+  output_files?: OutputFile[];
 }
 
 interface AppSettings {
@@ -33,6 +40,7 @@ const AVAILABLE_EMAILS = [
   'jagruti@wohlig.com',
   'dhruv.solanki@wohlig.com',
   'chintan@wohlig.com',
+  'ankit.shrivastav@wohlig.com',
 ];
 
 /* ── Helpers ── */
@@ -54,24 +62,57 @@ const fmtLastRun = (d?: string | null) => {
   return date.toLocaleString(undefined, opts);
 };
 
+const formatBytes = (bytes: number) => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+};
+
 /* ── Main Page ── */
 export default function HomePage() {
   const [html, setHtml] = useState<string>('');
-  const [loading, setLoading] = useState(false);
+  const [reportOnlyLoading, setReportOnlyLoading] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<'preview' | 'source'>('preview');
   const [status, setStatus] = useState<{ text: string; type: 'ok' | 'err' | '' }>({ text: 'Ready', type: '' });
-  const [savingSettings, setSavingSettings] = useState(false);
+
+  const [outputFiles, setOutputFiles] = useState<Record<StageId, OutputFile[]>>({
+    drive_extract: [],
+    llm_analysis: [],
+    report_service: [],
+    email: [],
+  });
 
   const [stages, setStages] = useState<Record<StageId, { status: StageStatus; log: string }>>({
     drive_extract: { status: 'pending', log: 'Waiting...' },
     llm_analysis: { status: 'pending', log: 'Waiting...' },
     report_service: { status: 'pending', log: 'Waiting...' },
+    email: { status: 'pending', log: 'Waiting...' },
   });
+
+  const STAGE_ORDER: StageId[] = ['drive_extract', 'llm_analysis', 'report_service', 'email'];
+
+  /* Mark all stages before the current one as completed */
+  const completeEarlierStages = useCallback((currentStage: StageId) => {
+    const idx = STAGE_ORDER.indexOf(currentStage);
+    if (idx <= 0) return;
+    setStages(prev => {
+      const next = { ...prev };
+      STAGE_ORDER.slice(0, idx).forEach(sid => {
+        if (next[sid].status === 'running' || next[sid].status === 'pending') {
+          next[sid] = { ...next[sid], status: 'completed', log: next[sid].log || 'Done' };
+        }
+      });
+      return next;
+    });
+  }, []);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const [pipelineMsg, setPipelineMsg] = useState('Ready to start...');
   const [pipelineState, setPipelineState] = useState<'idle' | 'success' | 'error'>('idle');
+  const [isReportOnlyMode, setIsReportOnlyMode] = useState(false);
 
   const [settings, setSettings] = useState<AppSettings>({
     recipients: ['chintan@wohlig.com', 'jagruti@wohlig.com', 'chirag@wohlig.com'],
@@ -109,22 +150,94 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
-  /* ── Run Pipeline ── */
-  const runPipeline = useCallback(async () => {
-    setLoading(true);
+  /* ── Persist draft next_run in localStorage ── */
+  useEffect(() => {
+    const saved = localStorage.getItem('nextRunDraft');
+    if (saved) {
+      setSettings(prev => ({ ...prev, next_run: saved }));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('nextRunDraft', settings.next_run);
+  }, [settings.next_run]);
+
+  /* ── Run Pipeline Only (no email) ── */
+  const runPipelineOnly = useCallback(async () => {
+    // Confirm the FastAPI backend is reachable before opening the overlay.
+    try {
+      const probe = await fetch('/api/health', { method: 'GET' });
+      if (!probe.ok) throw new Error(`Backend health returned ${probe.status}`);
+    } catch (err: any) {
+      setPipelineOpen(true);
+      setPipelineState('error');
+      setPipelineMsg('Backend not running. In a separate terminal run: python -m uvicorn api.main:app --host 127.0.0.1 --port 8000');
+      setStatus({ text: 'Backend not running', type: 'err' });
+      return;
+    }
+
+    setReportOnlyLoading(true);
+    setIsReportOnlyMode(true);
     setPipelineOpen(true);
     setPipelineState('idle');
-    setPipelineMsg('Starting pipeline...');
-    setStages({
+    setPipelineMsg('Checking existing stage outputs...');
+    setOutputFiles({ drive_extract: [], llm_analysis: [], report_service: [], email: [] });
+
+    // ── 1. Check disk state first ───────────────────────────────────────
+    let initialStages: Record<StageId, { status: StageStatus; log: string }> = {
       drive_extract: { status: 'pending', log: 'Waiting...' },
       llm_analysis: { status: 'pending', log: 'Waiting...' },
       report_service: { status: 'pending', log: 'Waiting...' },
-    });
+      email: { status: 'pending', log: 'Skipped — report only mode' },
+    };
+    let initialFiles: Record<StageId, OutputFile[]> = {
+      drive_extract: [], llm_analysis: [], report_service: [], email: [],
+    };
+
+    let driveExists = false;
+    let llmExists = false;
+    try {
+      const res = await fetch('/api/pipeline-status');
+      if (res.ok) {
+        const diskState = await res.json();
+
+        if (diskState.drive_extract?.completed) {
+          driveExists = true;
+          initialStages.drive_extract = { status: 'completed', log: 'Already complete ✓ (from previous run)' };
+          initialFiles.drive_extract = diskState.drive_extract.output_files || [];
+        }
+        if (diskState.llm_analysis?.completed) {
+          llmExists = true;
+          initialStages.llm_analysis = { status: 'completed', log: 'Already complete ✓ (from previous run)' };
+          initialFiles.llm_analysis = diskState.llm_analysis.output_files || [];
+        }
+        if (diskState.report_service?.completed) {
+          initialStages.report_service = { status: 'completed', log: 'Already complete ✓ (from previous run)' };
+          initialFiles.report_service = diskState.report_service.output_files || [];
+        }
+      }
+    } catch { /* ignore */ }
+
+    setStages(initialStages);
+    setOutputFiles(initialFiles);
+
+    // Decide which endpoint to call:
+    //   - /api/generate-report  → skips Drive + LLM, runs only report_service
+    //   - /api/run-pipeline     → runs everything
+    const endpoint = driveExists && llmExists ? '/api/generate-report' : '/api/run-pipeline';
+    if (endpoint === '/api/generate-report') {
+      setPipelineMsg('Drive + LLM outputs already exist. Skipping to report generation...');
+    } else {
+      setPipelineMsg('Starting pipeline...');
+    }
 
     try {
-      const res = await fetch('/api/run-pipeline', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
+        },
         body: JSON.stringify({}),
       });
       const reader = res.body?.getReader();
@@ -133,7 +246,11 @@ export default function HomePage() {
 
       while (reader) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          const tail = decoder.decode();
+          if (tail) buf += tail;
+          break;
+        }
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split('\n');
         buf = lines.pop() ?? '';
@@ -148,10 +265,21 @@ export default function HomePage() {
               if (data.status === 'success') {
                 setPipelineState('success');
                 setPipelineMsg('Report generated successfully!');
-                setHtml(data.html ?? '');
                 setStatus({ text: 'Report generated successfully', type: 'ok' });
+
+                const reportRes = await fetch('/api/report');
+                const reportData = await reportRes.json();
+
+                if (reportData.html) {
+                  setHtml(reportData.html);
+                }
+
                 setSettings(prev => ({ ...prev, last_run: new Date().toISOString() }));
-                setTimeout(() => setPipelineOpen(false), 2000);
+                setStages(prev => ({
+                  ...prev,
+                  report_service: { ...prev.report_service, status: 'completed', log: prev.report_service.log || 'Report generated' },
+                }));
+                setTimeout(() => setPipelineOpen(false), 1200);
               } else {
                 setPipelineState('error');
                 setPipelineMsg(`Failed: ${data.message || 'Unknown error'}`);
@@ -159,15 +287,82 @@ export default function HomePage() {
               }
             } else {
               const sid = data.stage as StageId;
-              setStages(prev => ({
-                ...prev,
-                [sid]: { status: data.status as StageStatus, log: data.message || '' },
-              }));
-              setPipelineMsg(`${sid}: ${data.message || 'Running...'}`);
+              completeEarlierStages(sid);
+              setStages(prev => {
+                const currentLog = prev[sid].log || '';
+                const nextLog = data.status === 'running'
+                  ? (currentLog === 'Waiting...' ? (data.message || '') : `${currentLog}\n${data.message || ''}`)
+                  : (data.message || prev[sid].log || '');
+                return {
+                  ...prev,
+                  [sid]: { status: data.status as StageStatus, log: nextLog },
+                };
+              });
+              if (data.output_files) {
+                setOutputFiles(prev => ({ ...prev, [sid]: data.output_files! }));
+              }
+              if (data.status === 'running') {
+                setPipelineMsg(`${sid}: ${data.message || 'Running...'}`);
+              } else if (data.status === 'completed') {
+                setPipelineMsg(`${sid} completed`);
+              }
             }
           } catch {
             // ignore parse errors
           }
+        }
+      }
+
+      if (buf.trim()) {
+        const remainingLines = buf.split('\n');
+        for (const line of remainingLines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          const dataStr = line.slice(6);
+          if (!dataStr) continue;
+          try {
+            const data: PipelineEvent = JSON.parse(dataStr);
+            if (data.stage === 'pipeline') {
+              if (data.status === 'success') {
+                setPipelineState('success');
+                setPipelineMsg('Report generated successfully!');
+                setStatus({ text: 'Report generated successfully', type: 'ok' });
+
+                const reportRes = await fetch('/api/report');
+                const reportData = await reportRes.json();
+
+                if (reportData.html) {
+                  setHtml(reportData.html);
+                }
+
+                setSettings(prev => ({ ...prev, last_run: new Date().toISOString() }));
+                setStages(prev => ({
+                  ...prev,
+                  report_service: { ...prev.report_service, status: 'completed', log: prev.report_service.log || 'Report generated' },
+                }));
+                setTimeout(() => setPipelineOpen(false), 1200);
+              } else {
+                setPipelineState('error');
+                setPipelineMsg(`Failed: ${data.message || 'Unknown error'}`);
+                setStatus({ text: `Pipeline failed: ${data.message || ''}`, type: 'err' });
+              }
+            } else {
+              const sid = data.stage as StageId;
+              completeEarlierStages(sid);
+              setStages(prev => {
+                const currentLog = prev[sid].log || '';
+                const nextLog = data.status === 'running'
+                  ? (currentLog === 'Waiting...' ? (data.message || '') : `${currentLog}\n${data.message || ''}`)
+                  : (data.message || prev[sid].log || '');
+                return {
+                  ...prev,
+                  [sid]: { status: data.status as StageStatus, log: nextLog },
+                };
+              });
+              if (data.output_files) {
+                setOutputFiles(prev => ({ ...prev, [sid]: data.output_files! }));
+              }
+            }
+          } catch { /* ignore */ }
         }
       }
     } catch (err: any) {
@@ -175,11 +370,9 @@ export default function HomePage() {
       setPipelineMsg(err?.message?.includes('Failed to fetch') ? 'Backend not running' : `Error: ${err.message}`);
       setStatus({ text: 'Backend not running or unreachable', type: 'err' });
     } finally {
-      setLoading(false);
+      setReportOnlyLoading(false);
     }
   }, []);
-
-  /* ── Send Email ── */
   const sendEmail = useCallback(async () => {
     if (!settings.recipients.length) {
       setStatus({ text: 'No recipients selected', type: 'err' });
@@ -211,38 +404,31 @@ export default function HomePage() {
 
   /* ── Save Settings ── */
   const saveSettings = useCallback(async () => {
-    // Prevent double submissions
-    if (savingSettings) return;
-    setSavingSettings(true);
-    
     try {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      const data = await res.json();
-      if (data) setSettings(prev => ({ ...prev, ...data }));
-      setShowSettings(false);
-      setStatus({ text: 'Settings saved', type: 'ok' });
-      
-      // Auto-trigger scheduler if active
-      if (settings.active) {
-        try {
-          const cronRes = await fetch('/api/cron');
-          const cronData = await cronRes.json();
-          console.log('Scheduler triggered:', cronData);
-          setStatus({ text: 'Settings saved & scheduler triggered', type: 'ok' });
-        } catch (err) {
-          console.error('Scheduler trigger error:', err);
-        }
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Server returned ${res.status}: ${errText.substring(0, 100)}`);
       }
+      const data = await res.json();
+      if (data.settings) setSettings(prev => ({ ...prev, ...data.settings }));
+      setShowSettings(false);
+      const active = data.settings?.active ?? settings.active;
+      const nextRunText = settings.next_run ? fmtDate(settings.next_run) : 'no next run set';
+      setStatus({
+        text: active
+          ? `Automation ACTIVE — next run: ${nextRunText}`
+          : 'Automation INACTIVE — settings saved',
+        type: 'ok',
+      });
     } catch (err: any) {
       setStatus({ text: `Save failed: ${err.message}`, type: 'err' });
-    } finally {
-      setSavingSettings(false);
     }
-  }, [settings, savingSettings]);
+  }, [settings]);
 
   const resetSettings = useCallback(() => {
     setSettings({
@@ -288,54 +474,29 @@ export default function HomePage() {
             <Image src="/logo.webp" alt="Wohlig Logo" width={80} height={24} className="object-contain" priority />
           </div>
           <span className="text-sm font-medium text-white/80 hidden sm:inline">Report Dashboard</span>
+          {settings.active && (
+            <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Automation active
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
-          {settings.active ? (
-            <button
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition bg-danger text-white hover:brightness-110 shadow-md"
-              onClick={async () => {
-                const updated = { ...settings, active: false };
-                setSettings(updated);
-                await fetch('/api/settings', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(updated),
-                });
-                setStatus({ text: 'Automation stopped', type: 'ok' });
-              }}
-            >
-              ⏹ Stop Automation
-            </button>
-          ) : (
-            <button
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition bg-gradient-to-r from-indigo to-purple text-white hover:brightness-110 shadow-md"
-              onClick={async () => {
-                const updated = { ...settings, active: true };
-                setSettings(updated);
-                await fetch('/api/settings', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(updated),
-                });
-                setStatus({ text: 'Automation initiated', type: 'ok' });
-              }}
-            >
-              ▶ Go (Start Automation)
-            </button>
-          )}
+          {/* Generate Report Once — pipeline only, no email */}
           <button
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white/10 hover:bg-white/20 text-white transition ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-            onClick={() => { if (!loading) runPipeline(); }}
-            disabled={loading}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white/10 hover:bg-white/20 text-white transition ${reportOnlyLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={() => { if (!reportOnlyLoading) runPipelineOnly(); }}
+            disabled={reportOnlyLoading}
           >
-            {loading ? (
+            {reportOnlyLoading ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 Running…
               </>
-            ) : 'Generate Report Once'}
+            ) : 'Generate Report Only'}
           </button>
 
+          {/* Send Email only */}
           <button
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
               settings.recipients.length && !emailSending
@@ -403,8 +564,8 @@ export default function HomePage() {
                 />
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate text-sm gap-2">
-                  <p>Click <span className="font-semibold text-indigo">Generate Report Once</span> or <span className="font-semibold text-indigo">Go</span> to run the pipeline:</p>
-                  <p className="text-xs opacity-70">Extract data → LLM Analysis → Generate HTML Report</p>
+                  <p>Click <span className="font-semibold text-indigo">Generate Report Only</span> to create the report.</p>
+                  <p className="text-xs opacity-70">Use Settings to enable automatic scheduled emails.</p>
                 </div>
               )
             ) : (
@@ -429,40 +590,65 @@ export default function HomePage() {
                   { id: 'drive_extract' as StageId, num: 1, name: 'Fetch Excel from Google Drive', desc: 'Download and extract all sheet data' },
                   { id: 'llm_analysis' as StageId, num: 2, name: 'LLM Analysis', desc: 'Send data to Ollama for workforce audit' },
                   { id: 'report_service' as StageId, num: 3, name: 'Generate HTML Report', desc: 'Render the final workforce report from template' },
-                ]).map(s => {
+                  { id: 'email' as StageId, num: 4, name: 'Schedule Email', desc: 'Schedule email to selected recipients at configured date/time' },
+                ]).filter(s => !(isReportOnlyMode && s.id === 'email')).map(s => {
                   const st = stages[s.id];
+                  const files = outputFiles[s.id] || [];
+                  const isCompleted = st.status === 'completed';
+                  const isRunning = st.status === 'running';
+                  const isError = st.status === 'error';
                   return (
                     <div
                       key={s.id}
-                      className={`flex items-start gap-4 p-4 rounded-xl border transition ${
-                        st.status === 'running'
-                          ? 'border-indigo shadow-[0_0_0_3px_rgba(67,84,212,0.08)]'
-                          : st.status === 'completed'
-                          ? 'border-success bg-success/[0.03]'
-                          : st.status === 'error'
-                          ? 'border-danger bg-danger/[0.03]'
-                          : 'border-hairline opacity-60'
+                      className={`flex items-start gap-4 p-4 rounded-xl border-2 transition-all duration-300 ${
+                        isRunning
+                          ? 'border-purple-400 bg-gradient-to-br from-violet-50 to-purple-100 shadow-lg shadow-purple-200/50 transform scale-[1.01]'
+                          : isCompleted
+                          ? 'border-purple-600 bg-gradient-to-br from-purple-50 to-fuchsia-50'
+                          : isError
+                          ? 'border-red-500 bg-red-50'
+                          : 'border-purple-200/60 bg-purple-50/30'
                       }`}
                     >
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 border ${
-                          st.status === 'running'
-                            ? 'bg-gradient-to-br from-indigo to-purple text-white border-transparent animate-pulse'
-                            : st.status === 'completed'
-                            ? 'bg-success text-white border-transparent'
-                            : st.status === 'error'
-                            ? 'bg-danger text-white border-transparent'
-                            : 'bg-white text-slate border-hairline'
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 border transition-all ${
+                          isRunning
+                            ? 'bg-gradient-to-br from-purple-600 to-violet-500 text-white border-transparent animate-pulse shadow-lg shadow-purple-500/30'
+                            : isCompleted
+                            ? 'bg-purple-600 text-white border-transparent'
+                            : isError
+                            ? 'bg-red-500 text-white border-transparent'
+                            : 'bg-purple-100 text-purple-300 border-purple-200'
                         }`}
                       >
-                        {s.num}
+                        {isCompleted ? '✓' : isError ? '✕' : s.num}
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="font-bold text-sm text-navy">{s.name}</div>
                         <div className="text-xs text-slate mt-0.5">{s.desc}</div>
-                        <div className="mt-2 p-2 bg-mist rounded-lg text-xs font-mono text-slate max-h-28 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                        <div className="mt-2 p-2 bg-white/70 rounded-lg text-xs font-mono text-slate max-h-28 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-purple-100/50">
                           {st.log}
                         </div>
+                        {files.length > 0 && (
+                          <div className="mt-2 flex flex-col gap-1">
+                            {files.map(f => (
+                              <div key={f.name} className="flex items-center gap-2 text-[11px]">
+                                <span className={f.exists ? 'text-emerald-500' : 'text-red-500'}>
+                                  {f.exists ? '✓' : '✕'}
+                                </span>
+                                <span className="text-purple-800 font-medium truncate" title={f.name}>
+                                  {f.name}
+                                </span>
+                                {f.exists && (
+                                  <span className="text-purple-400 ml-auto shrink-0">{formatBytes(f.size)}</span>
+                                )}
+                                {!f.exists && (
+                                  <span className="text-red-400 ml-auto shrink-0">Not found</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -500,12 +686,24 @@ export default function HomePage() {
               {/* Status */}
               <div className="space-y-3">
                 <h3 className="text-[11px] font-bold text-indigo uppercase tracking-wider">Status</h3>
-                <div className="flex items-center justify-between bg-white border border-hairline rounded-xl p-4">
+                <button
+                  onClick={() => setSettings(prev => ({ ...prev, active: !prev.active }))}
+                  className={`w-full flex items-center justify-between rounded-xl p-4 border transition ${
+                    settings.active
+                      ? 'bg-success/[0.06] border-success/30 hover:border-success'
+                      : 'bg-white border-hairline hover:border-indigo'
+                  }`}
+                >
                   <span className="font-bold text-navy text-sm">Automation</span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${settings.active ? 'bg-success/10 text-success' : 'bg-slate/10 text-slate'}`}>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold transition ${settings.active ? 'bg-success/10 text-success' : 'bg-slate/10 text-slate'}`}>
                     {settings.active ? 'ACTIVE' : 'INACTIVE'}
                   </span>
-                </div>
+                </button>
+                <p className="text-xs text-slate opacity-70">
+                  {settings.active
+                    ? `Automation is ACTIVE. The scheduler will keep running across page refreshes until you open Settings and set it to INACTIVE.`
+                    : `Automation is INACTIVE. Turn it ON and click Save to start scheduled runs. The state is saved on the server, so it survives refreshes and crashes.`}
+                </p>
               </div>
 
               {/* Schedule */}

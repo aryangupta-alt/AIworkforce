@@ -2,6 +2,7 @@ import os
 import io
 import json
 import glob
+from pathlib import Path
 from dotenv import load_dotenv
 import pandas as pd
 from googleapiclient.discovery import build
@@ -16,29 +17,47 @@ load_dotenv()
 # =============================================================
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def find_service_account_file():
-    """Find Google service account JSON file automatically."""
-    # 1. Check env var
-    env_file = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE', '')
-    if env_file and os.path.exists(env_file):
-        return env_file
+    """Find Google service account JSON file or env var."""
+    # 1. Check for full JSON in env var (Vercel-compatible)
+    sa_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
+    if sa_json:
+        try:
+            data = json.loads(sa_json)
+            if data.get('type') == 'service_account':
+                import tempfile
+                tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+                json.dump(data, tmp)
+                tmp.close()
+                return tmp.name
+        except (json.JSONDecodeError, Exception):
+            pass
 
-    # 2. Look for any .json file that looks like a service account key
+    # 2. Check env var for file path
+    env_file = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE', '')
+    if env_file:
+        env_file_path = Path(env_file)
+        if not env_file_path.is_absolute():
+            env_file_path = BASE_DIR / env_file_path
+        if env_file_path.exists():
+            return str(env_file_path)
+
+    # 3. Look for any .json file that looks like a service account key
     patterns = [
         'service-account*.json',
         '*credentials*.json',
         '*.googleapis.com*.json',
-        '*-*.json',  # typical random-looking names
+        '*-*.json',
     ]
     for pattern in patterns:
-        matches = glob.glob(pattern)
+        matches = glob.glob(str(BASE_DIR / pattern))
         for m in matches:
             try:
                 with open(m, 'r') as f:
                     data = json.load(f)
-                # Service account files have 'type': 'service_account'
                 if data.get('type') == 'service_account':
                     return m
             except (json.JSONDecodeError, IOError):
@@ -154,8 +173,22 @@ def run_extraction(
             print("        Or pass drive_files dict to run_extraction()")
             raise ValueError("No drive files configured")
 
-    output_json_file = output_json_file or os.environ.get('OUTPUT_JSON_FILE', 'all_files_extracted_data.json')
-    download_folder = download_folder or os.environ.get('DOWNLOAD_FOLDER', 'data')
+    # Ensure absolute paths
+    env_output_file = os.environ.get('OUTPUT_JSON_FILE')
+    if env_output_file:
+        op = Path(env_output_file)
+        output_json_file = output_json_file or (op if op.is_absolute() else BASE_DIR / op)
+    else:
+        output_json_file = output_json_file or (BASE_DIR / 'all_files_extracted_data.json')
+    output_json_file = str(output_json_file)
+
+    env_download_folder = os.environ.get('DOWNLOAD_FOLDER')
+    if env_download_folder:
+        dp = Path(env_download_folder)
+        download_folder = download_folder or (dp if dp.is_absolute() else BASE_DIR / dp)
+    else:
+        download_folder = download_folder or (BASE_DIR / 'data')
+    download_folder = str(download_folder)
 
     os.makedirs(download_folder, exist_ok=True)
 

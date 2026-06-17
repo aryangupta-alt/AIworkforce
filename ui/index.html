@@ -269,23 +269,25 @@
       gap: 16px;
       padding: 16px 20px;
       background: var(--white);
-      border: 1px solid var(--hairline);
+      border: 1.5px solid var(--hairline);
       border-radius: 10px;
       transition: all 0.3s ease;
     }
     .stage-item.running {
-      border-color: var(--indigo);
-      box-shadow: 0 0 0 3px rgba(67,84,212,0.08);
+      border-color: #9D4EDD;
+      box-shadow: 0 0 0 3px rgba(157,78,221,0.12), 0 4px 16px rgba(157,78,221,0.08);
+      background: linear-gradient(135deg, rgba(157,78,221,0.04), rgba(139,92,246,0.06));
+      transform: scale(1.01);
     }
     .stage-item.completed {
-      border-color: var(--success);
-      background: rgba(22,163,74,0.03);
+      border-color: #7C3AED;
+      background: linear-gradient(135deg, rgba(124,58,237,0.04), rgba(167,139,250,0.06));
     }
     .stage-item.error {
       border-color: var(--danger);
       background: rgba(220,38,38,0.03);
     }
-    .stage-item.pending { opacity: 0.6; }
+    .stage-item.pending { opacity: 0.55; }
 
     .stage-icon {
       width: 32px;
@@ -300,15 +302,17 @@
       background: var(--light);
       color: var(--slate);
       border: 1px solid var(--hairline);
+      transition: all 0.3s ease;
     }
     .stage-item.running .stage-icon {
-      background: linear-gradient(135deg, var(--indigo), var(--purple));
+      background: linear-gradient(135deg, #7C3AED, #9D4EDD);
       color: var(--white);
       border-color: transparent;
       animation: pulse 1.5s infinite;
+      box-shadow: 0 4px 12px rgba(124,58,237,0.3);
     }
     .stage-item.completed .stage-icon {
-      background: var(--success);
+      background: #7C3AED;
       color: var(--white);
       border-color: transparent;
     }
@@ -317,11 +321,38 @@
       color: var(--white);
       border-color: transparent;
     }
+    .stage-item.pending .stage-icon {
+      background: #E0D4F7;
+      color: #A78BFA;
+      border-color: #C4B5FD;
+    }
 
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.05); }
     }
+
+    .stage-files {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stage-file {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.6);
+      border: 1px solid rgba(167,139,250,0.15);
+    }
+    .stage-file .file-status { font-weight: 700; }
+    .stage-file .file-status.ok { color: #16A34A; }
+    .stage-file .file-status.missing { color: #DC2626; }
+    .stage-file .file-name { color: #4C1D95; font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stage-file .file-size { color: #A78BFA; margin-left: auto; font-size: 10px; }
 
     .stage-content { flex: 1; }
     .stage-name {
@@ -621,6 +652,7 @@
               <div class="stage-name">Fetch Excel from Google Drive</div>
               <div class="stage-desc">Download and extract all sheet data</div>
               <div class="stage-log" id="log_drive_extract">Waiting...</div>
+              <div class="stage-files" id="files_drive_extract"></div>
             </div>
           </div>
 
@@ -630,6 +662,7 @@
               <div class="stage-name">LLM Analysis</div>
               <div class="stage-desc">Send data to Ollama for workforce audit</div>
               <div class="stage-log" id="log_llm_analysis">Waiting...</div>
+              <div class="stage-files" id="files_llm_analysis"></div>
             </div>
           </div>
 
@@ -639,6 +672,7 @@
               <div class="stage-name">Generate HTML Report</div>
               <div class="stage-desc">Render the final workforce report from template</div>
               <div class="stage-log" id="log_report_service">Waiting...</div>
+              <div class="stage-files" id="files_report_service"></div>
             </div>
           </div>
         </div>
@@ -665,6 +699,7 @@
         <div class="section-title">Recipients</div>
         <div class="email-list">
           <button class="btn email-btn" data-email="aryan.gupta@wohlig.com">aryan.gupta@wohlig.com</button>
+          <button class="btn email-btn" data-email="ankit.shrivastav@wohlig.com">ankit.shrivastav@wohlig.com</button>
           <!-- <button class="btn email-btn" data-email="chirag@wohlig.com">chirag@wohlig.com</button>
           <button class="btn email-btn" data-email="jagruti@wohlig.com">jagruti@wohlig.com</button> -->
         </div>
@@ -847,9 +882,10 @@
       els.pipelineSpinner.style.display = 'block';
     }
 
-    function setStageStatus(stage, status, message) {
+    function setStageStatus(stage, status, message, outputFiles) {
       const item = $(`.stage-item[data-stage="${stage}"]`);
       const log = $(`#log_${stage}`);
+      const filesContainer = $(`#files_${stage}`);
       if (!item) return;
 
       item.classList.remove('pending', 'running', 'completed', 'error');
@@ -864,6 +900,26 @@
         }
         log.scrollTop = log.scrollHeight;
       }
+
+      if (filesContainer && outputFiles && outputFiles.length > 0) {
+        filesContainer.innerHTML = outputFiles.map(f => {
+          const ok = f.exists;
+          const sizeStr = ok ? formatBytes(f.size) : 'Not found';
+          return `<div class="stage-file">
+            <span class="file-status ${ok ? 'ok' : 'missing'}">${ok ? '✓' : '✕'}</span>
+            <span class="file-name" title="${f.name}">${f.name}</span>
+            <span class="file-size">${sizeStr}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     function openPipeline() {
@@ -903,7 +959,11 @@
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            const tail = decoder.decode();
+            if (tail) buffer += tail;
+            break;
+          }
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
@@ -932,8 +992,8 @@
                   localStorage.setItem('htmlViewerSettings', JSON.stringify(s));
                   els.lastRunDisplay.textContent = fmtLastRun(s.lastRun);
 
-                  // Auto-close after 2 seconds
-                  setTimeout(closePipeline, 2000);
+                  // Auto-close immediately
+                  closePipeline();
                 } else if (data.status === 'failed') {
                   els.pipelineStatus.textContent = 'Pipeline failed: ' + (data.message || 'Unknown error');
                   els.pipelineStatus.className = 'pipeline-status error';
@@ -942,13 +1002,52 @@
                 }
               } else {
                 // Stage update
-                setStageStatus(data.stage, data.status, data.message || '');
+                setStageStatus(data.stage, data.status, data.message || '', data.output_files);
                 if (data.status === 'running') {
                   els.pipelineStatus.textContent = `${data.stage}: ${data.message || 'Running...'}`;
                 }
               }
             } catch (e) {
               console.warn('Failed to parse SSE data:', dataStr, e);
+            }
+          }
+        }
+
+        // Flush any remaining buffered lines after stream ends
+        if (buffer && buffer.trim()) {
+          const remainingLines = buffer.split('\n');
+          for (const line of remainingLines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6);
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.stage === 'pipeline') {
+                if (data.status === 'success') {
+                  els.pipelineStatus.textContent = 'Report generated successfully!';
+                  els.pipelineStatus.className = 'pipeline-status success';
+                  els.pipelineSpinner.style.display = 'none';
+                  showHtml(data.html, 'Generated Report');
+                  setStatus('Report generated successfully', 'ok');
+
+                  const s = JSON.parse(localStorage.getItem('htmlViewerSettings') || '{}');
+                  s.lastRun = new Date().toISOString();
+                  localStorage.setItem('htmlViewerSettings', JSON.stringify(s));
+                  els.lastRunDisplay.textContent = fmtLastRun(s.lastRun);
+                  closePipeline();
+                } else if (data.status === 'failed') {
+                  els.pipelineStatus.textContent = 'Pipeline failed: ' + (data.message || 'Unknown error');
+                  els.pipelineStatus.className = 'pipeline-status error';
+                  els.pipelineSpinner.style.display = 'none';
+                  setStatus('Pipeline failed: ' + (data.message || ''), 'err');
+                }
+              } else {
+                setStageStatus(data.stage, data.status, data.message || '', data.output_files);
+                if (data.status === 'running') {
+                  els.pipelineStatus.textContent = `${data.stage}: ${data.message || 'Running...'}`;
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE tail data:', dataStr, e);
             }
           }
         }
