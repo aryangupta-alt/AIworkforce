@@ -2,6 +2,7 @@ import asyncio
 import sys
 import os
 import json
+import threading
 from queue import Queue
 from threading import Thread
 from typing import Optional
@@ -9,8 +10,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+import uuid
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -32,6 +34,10 @@ if os.environ.get("VERCEL"):
 else:
     REPORT_HTML = PIPELINE_DIR / "reports" / "workforce_report.html"
     REPORT_PDF = PIPELINE_DIR / "reports" / "workforce_report.pdf"
+
+# In-memory job store (survives SSE disconnects)
+active_jobs = {}  # job_id -> {"status": ..., "logs": [...], "task": asyncio.Task}
+_pipeline_lock = asyncio.Lock()
 
 import io
 import sys
@@ -156,10 +162,11 @@ async def _stream_stage(stage_fn, stage_name):
     thread = Thread(target=_run_stage_streamed_target, args=(stage_fn, queue, stage_name), daemon=True)
     thread.start()
 
+    import queue as _q
     while thread.is_alive() or not queue.empty():
         try:
-            item = queue.get(timeout=0.2)
-        except Exception:
+            item = queue.get_nowait()
+        except _q.Empty:
             await asyncio.sleep(0.1)
             continue
 
@@ -294,6 +301,7 @@ def pipeline_status():
 # ── Output file paths for stage completion reporting ──
 EXTRACTED_JSON = PIPELINE_DIR / "all_files_extracted_data.json"
 ANALYSIS_JSON  = PIPELINE_DIR / "data" / "workforce_analysis_output.json"
+REPORT_HTML    = PIPELINE_DIR / "reports" / "workforce_report.html"
 
 
 def _stage_output_files(stage_id: str) -> list[dict]:
@@ -307,96 +315,207 @@ def _stage_output_files(stage_id: str) -> list[dict]:
     return []
 
 
-@app.post("/api/run-pipeline")
-async def run_pipeline(request: Request):
-    print("RUN PIPELINE HIT")
-    async def event_stream():
-        ok, stages_map, err = _import_stages()
-        if not ok:
-            yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': f'Import error: {err}'})}\n\n"
-            return
+def _update_job(job_id, event_dict, status=None):
+    job = active_jobs.get(job_id)
+    if not job:
+        return
+    if status:
+        job["status"] = status
+    sse = f"data: {json.dumps(event_dict)}\n\n"
+    job["logs"].append(sse)
+    waiter = job.get("_waiter")
+    if waiter:
+        waiter.set()
 
-        stage_labels = [
-            ("drive_extract", "Fetching Excel from Google Drive"),
-            ("llm_analysis", "LLM Analysis"),
-            ("report_service", "Generating HTML Report"),
-        ]
 
-        for stage_id, stage_name in stage_labels:
-            yield f"data: {json.dumps({'stage': stage_id, 'status': 'running', 'message': stage_name})}\n\n"
-            await asyncio.sleep(0.05)
+async def run_pipeline_background(job_id, mode="full", recipients=None, subject=None, body_line=None):
+    """mode: 'full' | 'report-only' | 'run-and-email'"""
+    try:
+        async with _pipeline_lock:
+            job = active_jobs.get(job_id)
+            if not job:
+                return
 
-            stage_fn = stages_map[stage_id]
-            async for ev in _stream_stage(stage_fn, stage_name):
-                if ev["type"] == "log":
-                    yield f"data: {json.dumps({'stage': stage_id, 'status': 'running', 'message': ev['line']})}\n\n"
-                elif ev["type"] == "error":
-                    yield f"data: {json.dumps({'stage': stage_id, 'status': 'error', 'message': ev['message']})}\n\n"
-                    yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': ev['message']})}\n\n"
+            _update_job(job_id, {"stage": "pipeline", "status": "started", "message": "Pipeline started"}, status="running")
+
+            ok, stages_map, err = await asyncio.to_thread(_import_stages)
+            if not ok:
+                _update_job(job_id, {"stage": "pipeline", "status": "failed", "message": f"Import error: {err}"}, status="failed")
+                return
+
+            stage_labels = [
+                ("drive_extract", "Fetching Excel from Google Drive"),
+                ("llm_analysis", "LLM Analysis"),
+                ("report_service", "Generating HTML Report"),
+            ]
+
+            if mode == "report-only":
+                for sid, sname in stage_labels[:2]:
+                    _update_job(job_id, {"stage": sid, "status": "completed", "message": f"{sname} — skipped (report-only mode)", "output_files": _stage_output_files(sid)})
+                stage_labels = [stage_labels[2]]
+            elif mode == "run-from-llm":
+                sid, sname = stage_labels[0]
+                _update_job(job_id, {"stage": sid, "status": "completed", "message": f"{sname} — skipped (data already on disk)", "output_files": _stage_output_files(sid)})
+                stage_labels = stage_labels[1:]
+
+            for stage_id, stage_name in stage_labels:
+                files = _stage_output_files(stage_id)
+                all_exist = len(files) > 0 and all(f["exists"] for f in files)
+
+                if all_exist and stage_id in ["drive_extract", "llm_analysis"] and mode != "run-and-email":
+                    _update_job(job_id, {"stage": stage_id, "status": "completed", "message": f"{stage_name} — skipped (already exists)", "output_files": files})
+                    continue
+
+                _update_job(job_id, {"stage": stage_id, "status": "running", "message": stage_name})
+
+                stage_fn = stages_map[stage_id]
+                async for ev in _stream_stage(stage_fn, stage_name):
+                    if ev["type"] == "log":
+                        _update_job(job_id, {"stage": stage_id, "status": "running", "message": ev["line"]})
+                    elif ev["type"] == "error":
+                        _update_job(job_id, {"stage": stage_id, "status": "error", "message": ev["message"]})
+                        _update_job(job_id, {"stage": "pipeline", "status": "failed", "message": ev["message"]}, status="failed")
+                        return
+
+                _update_job(job_id, {"stage": stage_id, "status": "completed", "message": f"{stage_name} ✓", "output_files": _stage_output_files(stage_id)})
+
+            html_content = ""
+            if REPORT_HTML.exists():
+                html_content = await asyncio.to_thread(lambda: REPORT_HTML.read_text(encoding="utf-8"))
+
+            if mode == "run-and-email":
+                if not recipients:
+                    _update_job(job_id, {"stage": "email", "status": "failed", "message": "No recipients selected."})
+                    _update_job(job_id, {"stage": "pipeline", "status": "success", "html": html_content}, status="success")
                     return
 
-            yield "data: " + json.dumps({"stage": stage_id, "status": "completed", "message": f"{stage_name} ✓", "output_files": _stage_output_files(stage_id)}) + "\n\n"
-            await asyncio.sleep(0.05)
+                _update_job(job_id, {"stage": "email", "status": "running", "message": "Sending email via SMTP..."})
+                result = await asyncio.to_thread(
+                    send_email_with_pdf,
+                    recipients=recipients,
+                    subject=subject,
+                    body_line=body_line,
+                    html_path=str(REPORT_HTML),
+                    pdf_path=str(REPORT_PDF),
+                )
+                if result.get("success"):
+                    msg = f'Email sent to {", ".join(recipients)}'
+                    _update_job(job_id, {"stage": "email", "status": "success", "message": msg})
+                else:
+                    _update_job(job_id, {"stage": "email", "status": "failed", "message": result.get("error", "Email sending failed")})
 
-        yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'success', 'message': 'Pipeline completed'})}\n\n"
+            _update_job(job_id, {"stage": "pipeline", "status": "success", "html": html_content}, status="success")
+    finally:
+        # Retain job for 10 minutes so clients can reconnect
+        async def _cleanup():
+            await asyncio.sleep(600)
+            job = active_jobs.get(job_id)
+            if job:
+                waiter = job.get("_waiter")
+                if waiter:
+                    waiter.set()
+            active_jobs.pop(job_id, None)
+        asyncio.create_task(_cleanup())
+
+
+@app.post("/api/run-pipeline")
+async def run_pipeline(request: Request):
+    job_id = str(uuid.uuid4())
+    task = asyncio.create_task(run_pipeline_background(job_id, mode="full"))
+    active_jobs[job_id] = {
+        "status": "running",
+        "logs": [],
+        "task": task,
+        "_waiter": asyncio.Event(),
+        "_sent": 0,
+    }
+    return {"job_id": job_id}
+
+@app.post("/api/run-from-llm")
+async def run_from_llm():
+    job_id = str(uuid.uuid4())
+    task = asyncio.create_task(run_pipeline_background(job_id, mode="run-from-llm"))
+    active_jobs[job_id] = {
+        "status": "running",
+        "logs": [],
+        "task": task,
+        "_waiter": asyncio.Event(),
+        "_sent": 0,
+    }
+    return {"job_id": job_id}
+
+
+async def _sse_for_job(job_id):
+    job = active_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    async def event_stream():
+        index = 0
+        while True:
+            job = active_jobs.get(job_id)
+            if not job:
+                # Job expired; done
+                return
+
+            waiter = job.get("_waiter")
+            if waiter:
+                waiter.clear()
+
+            logs = job.get("logs", [])
+            while index < len(logs):
+                yield logs[index]
+                index += 1
+
+            # Wait until new log arrives or job finishes
+            if job.get("status") in ("success", "failed", "error"):
+                return
+
+            if index >= len(job.get("logs", [])):
+                if waiter:
+                    await waiter.wait()
 
     return StreamingResponse(
-        event_stream(), 
+        event_stream(),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+            "Connection": "keep-alive",
+        },
     )
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def stream_job(job_id: str):
+    return await _sse_for_job(job_id)
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    job = active_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "log_count": len(job.get("logs", [])),
+    }
 
 
 @app.post("/api/generate-report")
 async def generate_report_only():
     """Regenerate the HTML report from the existing analysis JSON (skip Drive + LLM)."""
-    print("GENERATE REPORT HIT")
-    async def event_stream():
-        ok, stages_map, err = _import_stages()
-        if not ok:
-            yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': f'Import error: {err}'})}\n\n"
-            return
-
-        # Mark earlier stages as skipped
-        for stage_id, stage_name in [
-            ("drive_extract", "Fetching Excel from Google Drive"),
-            ("llm_analysis", "LLM Analysis"),
-        ]:
-            yield f"data: {json.dumps({'stage': stage_id, 'status': 'completed', 'message': f'{stage_name} — skipped (report-only mode)', 'output_files': _stage_output_files(stage_id)})}\n\n"
-            await asyncio.sleep(0.05)
-
-        # Run only report_service with live logs
-        stage_id, stage_name = "report_service", "Generating HTML Report"
-        yield f"data: {json.dumps({'stage': stage_id, 'status': 'running', 'message': stage_name})}\n\n"
-        await asyncio.sleep(0.05)
-
-        stage_fn = stages_map[stage_id]
-        async for ev in _stream_stage(stage_fn, stage_name):
-            if ev["type"] == "log":
-                yield f"data: {json.dumps({'stage': stage_id, 'status': 'running', 'message': ev['line']})}\n\n"
-            elif ev["type"] == "error":
-                yield f"data: {json.dumps({'stage': stage_id, 'status': 'error', 'message': ev['message']})}\n\n"
-                yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': ev['message']})}\n\n"
-                return
-
-        yield f"data: {json.dumps({'stage': stage_id, 'status': 'completed', 'message': f'{stage_name} ✓', 'output_files': _stage_output_files(stage_id)})}\n\n"
-        await asyncio.sleep(0.05)
-
-        yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'success', 'message': 'Report generated successfully'})}\n\n"
-
-    return StreamingResponse(
-        event_stream(), 
-        media_type="text/event-stream",
-        headers={
-            "X-Accel-Buffering": "no",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
-    )
+    job_id = str(uuid.uuid4())
+    task = asyncio.create_task(run_pipeline_background(job_id, mode="report-only"))
+    active_jobs[job_id] = {
+        "status": "running",
+        "logs": [],
+        "task": task,
+        "_waiter": asyncio.Event(),
+        "_sent": 0,
+    }
+    return {"job_id": job_id}
 class RunAndEmailPayload(BaseModel):
     recipients: list[str] = []
     subject: str = "Company Workforce Report"
@@ -404,71 +523,18 @@ class RunAndEmailPayload(BaseModel):
 
 @app.post("/api/run-and-email")
 async def run_and_email(request: Request, payload: RunAndEmailPayload):
-    recipients = payload.recipients
-    subject = payload.subject
-    body_line = payload.body_line
-
-    async def event_stream():
-        ok, stages_map, err = _import_stages()
-        if not ok:
-            yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': f'Import error: {err}'})}\n\n"
-            return
-
-        stage_labels = [
-            ("drive_extract", "Fetching Excel from Google Drive"),
-            ("llm_analysis", "LLM Analysis"),
-            ("report_service", "Generating HTML Report"),
-        ]
-
-        for stage_id, stage_name in stage_labels:
-            yield f"data: {json.dumps({'stage': stage_id, 'status': 'running', 'message': stage_name})}\n\n"
-            await asyncio.sleep(0.05)
-
-            stage_fn = stages_map[stage_id]
-            ok, stdout, stderr = await asyncio.to_thread(_run_stage, stage_fn)
-
-            if not ok:
-                yield f"data: {json.dumps({'stage': stage_id, 'status': 'error', 'message': stderr or stdout or f'{stage_name} failed'})}\n\n"
-                yield f"data: {json.dumps({'stage': 'pipeline', 'status': 'failed', 'message': stderr or stdout or f'{stage_name} failed'})}\n\n"
-                return
-
-            yield "data: " + json.dumps({"stage": stage_id, "status": "completed", "message": f"{stage_name} ✓", "output_files": _stage_output_files(stage_id)}) + "\n\n"
-            await asyncio.sleep(0.05)
-
-        yield "data: " + json.dumps({"stage": "pipeline", "status": "success", "message": "Report generated successfully"}) + "\n\n"
-        await asyncio.sleep(0.2)
-
-        if not recipients:
-            yield "data: " + json.dumps({"stage": "email", "status": "failed", "message": "No recipients selected."}) + "\n\n"
-            return
-
-        yield "data: " + json.dumps({"stage": "email", "status": "running", "message": "Sending email via SMTP..."}) + "\n\n"
-        await asyncio.sleep(0.05)
-
-        result = await asyncio.to_thread(
-            send_email_with_pdf,
-            recipients=recipients,
-            subject=subject,
-            body_line=body_line,
-            html_path=str(REPORT_HTML),
-            pdf_path=str(REPORT_PDF),
-        )
-
-        if result.get("success"):
-            msg = f'Email sent to {", ".join(recipients)}'
-            yield f"data: {json.dumps({'stage': 'email', 'status': 'success', 'message': msg})}\n\n"
-        else:
-            yield f"data: {json.dumps({'stage': 'email', 'status': 'failed', 'message': result.get('error', 'Email sending failed')})}\n\n"
-
-    return StreamingResponse(
-        event_stream(), 
-        media_type="text/event-stream",
-        headers={
-            "X-Accel-Buffering": "no",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+    job_id = str(uuid.uuid4())
+    task = asyncio.create_task(
+        run_pipeline_background(job_id, mode="run-and-email", recipients=payload.recipients, subject=payload.subject, body_line=payload.body_line)
     )
+    active_jobs[job_id] = {
+        "status": "running",
+        "logs": [],
+        "task": task,
+        "_waiter": asyncio.Event(),
+        "_sent": 0,
+    }
+    return {"job_id": job_id}
 
 
 @app.post("/api/send-email")
@@ -490,7 +556,7 @@ async def send_email_only(payload: RunAndEmailPayload):
 @app.get("/api/report")
 def get_report():
     if not REPORT_HTML.exists():
-        return JSONResponse({"detail": "Report not found. Run pipeline first."}, status_code=404)
+        return JSONResponse({"html": None, "detail": "Report not found. Run pipeline first."}, status_code=200)
     with open(REPORT_HTML, "r", encoding="utf-8") as f:
         content = f.read()
     return JSONResponse({"html": content})

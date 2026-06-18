@@ -892,13 +892,19 @@
       item.classList.add(status);
 
       if (log) {
-        const current = log.textContent;
-        if (current === 'Waiting...') {
-          log.textContent = message;
-        } else {
-          log.textContent = current + '\n' + message;
+        if (status === 'pending') {
+          log.innerHTML = 'Waiting...';
+        } else if (status === 'running') {
+          let text = 'Processing...';
+          if (stage === 'drive_extract') text = 'Fetching latest data from Google Drive... ⏳';
+          if (stage === 'llm_analysis') text = 'Analyzing workforce data with AI... 🤖';
+          if (stage === 'report_service') text = 'Building the final HTML report... 📊';
+          log.innerHTML = `<span style="color: var(--indigo); font-weight: 600;">${text}</span>`;
+        } else if (status === 'completed') {
+          log.innerHTML = `<span style="color: var(--success); font-weight: 600;">✅ Successfully completed!</span>`;
+        } else if (status === 'error') {
+          log.innerHTML = `<span style="color: var(--danger); font-weight: 600;">❌ Error: ${message}</span>`;
         }
-        log.scrollTop = log.scrollHeight;
       }
 
       if (filesContainer && outputFiles && outputFiles.length > 0) {
@@ -937,13 +943,13 @@
       setStatus('Running pipeline...', '');
 
       try {
-        const res = await fetch('/api/run-pipeline', {
+        const initRes = await fetch('/api/run-pipeline', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
 
-        if (res.status === 404 || res.status === 405) {
+        if (initRes.status === 404 || initRes.status === 405) {
           els.pipelineStatus.textContent = 'Backend server not running';
           els.pipelineStatus.className = 'pipeline-status error';
           els.pipelineSpinner.style.display = 'none';
@@ -951,6 +957,15 @@
           els.btnFetch.disabled = false;
           return;
         }
+
+        const initData = await initRes.json();
+        const jobId = initData.job_id;
+        
+        if (!jobId) {
+          throw new Error('Failed to start pipeline job.');
+        }
+
+        const res = await fetch(`/api/jobs/${jobId}/stream`);
 
         // Handle SSE stream
         const reader = res.body.getReader();

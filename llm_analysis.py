@@ -12,24 +12,9 @@ load_dotenv()
 # ==========================================
 # ADAPTIVE CONFIGURATION (no hardcoding)
 # ==========================================
-BASE_DIR = Path(__file__).resolve().parent
-
-MODEL_NAME = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
-
-env_input = os.environ.get("INPUT_FILE")
-if env_input:
-    ip = Path(env_input)
-    INPUT_FILE = str(ip if ip.is_absolute() else BASE_DIR / ip)
-else:
-    INPUT_FILE = str(BASE_DIR / "all_files_extracted_data.json")
-
-env_output = os.environ.get("OUTPUT_FILE")
-if env_output:
-    op = Path(env_output)
-    OUTPUT_FILE = str(op if op.is_absolute() else BASE_DIR / op)
-else:
-    OUTPUT_FILE = str(BASE_DIR / "data" / "workforce_analysis_output.json")
-
+MODEL_NAME = os.environ.get("OLLAMA_MODEL", "deepseek-v4-flash:cloud")
+INPUT_FILE = os.environ.get("INPUT_FILE", "all_files_extracted_data.json")
+OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "data/workforce_analysis_output.json")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "https://ollama.com")
 USE_CHAT_API = os.environ.get("OLLAMA_USE_CHAT", "false").lower() in ("true", "1", "yes")
 

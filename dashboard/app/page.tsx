@@ -232,13 +232,22 @@ export default function HomePage() {
     }
 
     try {
-      const res = await fetch(endpoint, {
+      const initRes = await fetch(endpoint, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({}),
+      });
+      if (!initRes.ok) throw new Error(`Failed to start pipeline: ${initRes.status}`);
+      const initData = await initRes.json();
+      if (!initData.job_id) throw new Error('No job_id returned');
+
+      const res = await fetch(`/api/jobs/${initData.job_id}/stream`, {
+        method: 'GET',
+        headers: { 
+          'Accept': 'text/event-stream'
+        }
       });
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -265,26 +274,23 @@ export default function HomePage() {
               if (data.status === 'success') {
                 setPipelineState('success');
                 setPipelineMsg('Report generated successfully!');
+                setHtml(data.html ?? '');
                 setStatus({ text: 'Report generated successfully', type: 'ok' });
-
-                const reportRes = await fetch('/api/report');
-                const reportData = await reportRes.json();
-
-                if (reportData.html) {
-                  setHtml(reportData.html);
-                }
-
                 setSettings(prev => ({ ...prev, last_run: new Date().toISOString() }));
                 setStages(prev => ({
                   ...prev,
                   report_service: { ...prev.report_service, status: 'completed', log: prev.report_service.log || 'Report generated' },
                 }));
                 setTimeout(() => setPipelineOpen(false), 1200);
-              } else {
+              } else if (data.status === 'failed' || data.status === 'error') {
                 setPipelineState('error');
                 setPipelineMsg(`Failed: ${data.message || 'Unknown error'}`);
                 setStatus({ text: `Pipeline failed: ${data.message || ''}`, type: 'err' });
+              } else if (data.status === 'started') {
+                setPipelineState('running');
+                setPipelineMsg(data.message || 'Pipeline started');
               }
+
             } else {
               const sid = data.stage as StageId;
               completeEarlierStages(sid);
@@ -325,15 +331,8 @@ export default function HomePage() {
               if (data.status === 'success') {
                 setPipelineState('success');
                 setPipelineMsg('Report generated successfully!');
+                setHtml(data.html ?? '');
                 setStatus({ text: 'Report generated successfully', type: 'ok' });
-
-                const reportRes = await fetch('/api/report');
-                const reportData = await reportRes.json();
-
-                if (reportData.html) {
-                  setHtml(reportData.html);
-                }
-
                 setSettings(prev => ({ ...prev, last_run: new Date().toISOString() }));
                 setStages(prev => ({
                   ...prev,
